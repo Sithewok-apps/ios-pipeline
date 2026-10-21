@@ -51,6 +51,13 @@ jobs:
                 puts "STATUS #{bundle_id} (#{app.name}) #{b.app_version} (#{b.version}) " \
                      "uploaded #{b.uploaded_date}: processing=#{b.processing_state} testflight=#{state}"
               end
+              # Tester groups: counts only, no emails (this repo's logs are public)
+              groups = (app.get_beta_groups(includes: "betaTesters") rescue [])
+              puts "STATUS #{bundle_id} (#{app.name}): no tester groups" if groups.empty?
+              groups.each do |g|
+                puts "STATUS #{bundle_id} (#{app.name}) group '#{g.name}': internal=#{g.is_internal_group} " \
+                     "automatic=#{g.has_access_to_all_builds} testers=#{(g.beta_testers || []).size}"
+              end
             end
           end
           EOF
