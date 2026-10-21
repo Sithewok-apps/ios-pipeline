@@ -74,12 +74,23 @@ jobs:
                 puts "STATUS #{bundle_id} (#{app.name}): made the '#{name}' group (automatic distribution)"
               end
               have = (g.beta_testers || []).map(&:id)
-              add = testers.keys - have
-              g.add_beta_testers(beta_tester_ids: add) unless add.empty?
-              puts "STATUS #{bundle_id} (#{app.name}): '#{name}' has #{(have + add).uniq.size} testers (added #{add.size})"
+              added = 0
+              refused = []
+              (testers.keys - have).each do |tid|
+                begin
+                  g.add_beta_testers(beta_tester_ids: [tid])
+                  added += 1
+                rescue => e
+                  refused << e.message.to_s.split("\n").first
+                end
+              end
+              puts "STATUS #{bundle_id} (#{app.name}): '#{name}' has #{have.size + added} testers (added #{added}, Apple refused #{refused.size})"
+              refused.uniq.each { |m| puts "STATUS   refused because: #{m}" }
             end
           end
           EOF
           cd "$RUNNER_TEMP/friends"
-          fastlane friends > friends.log 2>&1 || { tail -40 friends.log; exit 1; }
-          grep STATUS friends.log
+          status=0
+          fastlane friends > friends.log 2>&1 || status=$?
+          grep STATUS friends.log || true
+          if [ "$status" != 0 ]; then grep -E "Error|error|\\[!\\]" friends.log | tail -5; exit "$status"; fi
