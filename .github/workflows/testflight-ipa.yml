@@ -232,6 +232,18 @@ jobs:
           plutil -remove 'CFBundleIcons~ipad' "$PL" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Merge $ICONS/partial.plist" "$PL"
 
+          # App Store Connect requires a version on every embedded framework;
+          # builds made outside Xcode (ANGLE's, for one) often leave it out.
+          for fw in "$APP"/Frameworks/*.framework; do
+            FPL="$fw/Info.plist"
+            [ -f "$FPL" ] || continue
+            if ! plutil -extract CFBundleShortVersionString raw -o - "$FPL" >/dev/null 2>&1; then
+              FVER=$(plutil -extract CFBundleVersion raw -o - "$FPL" 2>/dev/null || echo 1.0)
+              plutil -replace CFBundleShortVersionString -string "$FVER" "$FPL"
+              echo "Added CFBundleShortVersionString $FVER to $(basename "$fw")"
+            fi
+          done
+
           # Profile and its entitlements (no get-task-allow in an App Store profile).
           cp "$PROFILE_PATH" "$APP/embedded.mobileprovision"
           security cms -D -i "$PROFILE_PATH" > "$WORK/profile.plist"
