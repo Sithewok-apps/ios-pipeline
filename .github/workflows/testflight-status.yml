@@ -1,0 +1,59 @@
+# Read-only: prints the newest TestFlight builds of each app and where they are
+# (processing, needs the encryption answer, ready to test, failed). Changes
+# nothing. Pass bundle IDs separated by spaces, or leave the default.
+name: TestFlight status
+
+on:
+  workflow_dispatch:
+    inputs:
+      apps:
+        description: Bundle IDs to check, separated by spaces
+        required: true
+        default: com.sithewok.openjkdf2 com.sithewok.openmots com.sithewok.samfe com.sithewok.samse
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Install fastlane
+        run: gem install fastlane --no-document
+
+      - name: Show build status
+        env:
+          APPS: ${{ inputs.apps }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/status/fastlane"
+          cat > "$RUNNER_TEMP/status/fastlane/Fastfile" <<'EOF'
+          lane :status do
+            app_store_connect_api_key(
+              key_id: ENV["ASC_KEY_ID"].to_s.strip,
+              issuer_id: ENV["ASC_ISSUER_ID"].to_s.strip,
+              key_content: ENV["ASC_KEY_CONTENT"].to_s.strip
+            )
+            ENV["APPS"].split.each do |bundle_id|
+              app = Spaceship::ConnectAPI::App.find(bundle_id)
+              unless app
+                puts "STATUS #{bundle_id}: no App Store Connect app"
+                next
+              end
+              builds = Spaceship::ConnectAPI::Build.all(app_id: app.id, limit: 5).first(3)
+              puts "STATUS #{bundle_id} (#{app.name}): no builds" if builds.empty?
+              builds.each do |b|
+                state = b.build_beta_detail&.internal_build_state
+                puts "STATUS #{bundle_id} (#{app.name}) #{b.app_version} (#{b.version}) " \
+                     "uploaded #{b.uploaded_date}: processing=#{b.processing_state} testflight=#{state}"
+              end
+            end
+          end
+          EOF
+          cd "$RUNNER_TEMP/status"
+          fastlane status > status.log 2>&1 || { tail -40 status.log; exit 1; }
+          grep STATUS status.log
