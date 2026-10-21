@@ -156,11 +156,13 @@ jobs:
                 readonly: false
               )
 
-              build = latest_testflight_build_number(
+              # Never below the run number: a build Apple rejected after upload
+              # still uses up its number but may not show as the latest.
+              build = [latest_testflight_build_number(
                 api_key: key,
                 app_identifier: app_id,
                 initial_build_number: 0
-              ) + 1
+              ) + 1, ENV["GITHUB_RUN_NUMBER"].to_i].max
 
               export_env("SIGN_IDENTITY", ENV["sigh_#{app_id}_appstore_certificate-name"])
               export_env("PROFILE_PATH", ENV["sigh_#{app_id}_appstore_profile-path"])
@@ -214,6 +216,15 @@ jobs:
                     "BuildMachineOSBuild=$(sw_vers -buildVersion)"; do
             plutil -replace "${kv%%=*}" -string "${kv#*=}" "$PL"
           done
+
+          # Purpose strings App Store Connect demands (ITMS-90683) whenever a
+          # bundled library such as SDL references the API, even if the game
+          # never calls it. Added only when the app has none of its own.
+          add_purpose() {
+            plutil -extract "$1" raw -o - "$PL" >/dev/null 2>&1 || plutil -replace "$1" -string "$2" "$PL"
+          }
+          add_purpose NSCameraUsageDescription "This game doesn't use the camera."
+          add_purpose NSBluetoothAlwaysUsageDescription "Bluetooth connects game controllers."
 
           # App Store icon set from one opaque 1024 px PNG.
           ICONS="$WORK/icons"
