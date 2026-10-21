@@ -108,6 +108,11 @@ jobs:
           cat > "$WORK/fastlane/Fastfile" <<'EOF'
           default_platform(:ios)
 
+          # Secrets pasted on a phone often carry a stray space or line break.
+          # The key text keeps its inner line breaks; only the ends are trimmed.
+          %w[APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_CONTENT CERTS_REPO_URL
+             CERTS_REPO_USER CERTS_REPO_TOKEN MATCH_PASSWORD].each { |k| ENV[k] = ENV[k].to_s.strip }
+
           def asc_key
             app_store_connect_api_key(
               key_id: ENV["ASC_KEY_ID"],
