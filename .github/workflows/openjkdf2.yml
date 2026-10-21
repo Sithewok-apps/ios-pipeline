@@ -1,0 +1,42 @@
+# TestFlight for OpenJKDF2 (Jedi Knight) and OpenMoTS. Run it from here: this
+# repo is in Sithewok-apps, so it has the organization's secrets. It takes the
+# IPAs from a public release of sithewok13-dev/OpenJKDF2-iOS (no rebuild, no
+# change to that repo) and ships them as com.sithewok.openjkdf2 and
+# com.sithewok.openmots.
+name: TestFlight - OpenJKDF2
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: OpenJKDF2-iOS release to send (ios-latest = newest build, or a tag such as v0.9-beta1)
+        required: true
+        default: ios-latest
+
+jobs:
+  jedi-knight:
+    uses: ./.github/workflows/testflight-ipa.yml
+    with:
+      source_repo: sithewok13-dev/OpenJKDF2-iOS
+      app_identifier: com.sithewok.openjkdf2
+      app_name: OpenJKDF2
+      release_tag: ${{ inputs.release_tag }}
+      ipa_asset: OpenJKDF2-iOS-unsigned.ipa
+      icon: packaging/icon.png
+    secrets: inherit
+
+  # After Jedi Knight, so the first run creates the signing certificate once.
+  # Runs even if Jedi Knight failed.
+  mots:
+    needs: jedi-knight
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/testflight-ipa.yml
+    with:
+      source_repo: sithewok13-dev/OpenJKDF2-iOS
+      app_identifier: com.sithewok.openmots
+      app_name: OpenMoTS
+      release_tag: ${{ inputs.release_tag }}
+      ipa_asset: OpenJKDF2-MotS-iOS-unsigned.ipa
+      # Only a 256 px MotS icon exists; it is scaled up to 1024 px.
+      icon: packaging/mots_icon-256.png
+    secrets: inherit

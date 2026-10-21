@@ -24,8 +24,12 @@ on:
         description: File name of the IPA asset in that release
         type: string
         required: true
+      source_repo:
+        description: owner/repo whose release holds the IPA (default the calling repo; another repo must be public)
+        type: string
+        default: ""
       icon:
-        description: Path in the app repo to a square PNG app icon, ideally 1024 px
+        description: Path in the source repo to a square PNG app icon, ideally 1024 px
         type: string
         required: true
       app_name:
@@ -73,9 +77,10 @@ jobs:
       - name: Set the work folder
         run: echo "WORK=$RUNNER_TEMP/ship" >> "$GITHUB_ENV"
 
-      # Only the icon is needed from the app repo, so no submodules.
+      # Only the icon is needed from the source repo, so no submodules.
       - uses: actions/checkout@v4
         with:
+          repository: ${{ inputs.source_repo || github.repository }}
           persist-credentials: false
 
       - uses: ruby/setup-ruby@v1
@@ -88,12 +93,13 @@ jobs:
       - name: Download the IPA
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_REPO: ${{ inputs.source_repo || github.repository }}
           RELEASE_TAG: ${{ inputs.release_tag }}
           IPA_ASSET: ${{ inputs.ipa_asset }}
         run: |
           set -euo pipefail
           mkdir -p "$WORK/in"
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$IPA_ASSET" --dir "$WORK/in"
+          gh release download "$RELEASE_TAG" --repo "$SOURCE_REPO" --pattern "$IPA_ASSET" --dir "$WORK/in"
           ls -la "$WORK/in"
 
       - name: Write the fastlane lanes

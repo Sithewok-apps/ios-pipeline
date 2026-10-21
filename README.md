@@ -87,9 +87,11 @@ jobs:
     secrets: inherit
 ```
 
-A repo outside Sithewok-apps can't use `secrets: inherit` with the
-organization's secrets: add the eight secrets to that repo and pass them by name
-(see `sithewok13-dev/OpenJKDF2-iOS`, `.github/workflows/testflight.yml`).
+**App repo outside Sithewok-apps?** Its releases just need to be public. Put
+the caller file in this repo instead, with `source_repo: owner/repo`, so it runs
+here with the organization's secrets and the app repo needs no secrets or
+changes. Example: [`openjkdf2.yml`](.github/workflows/openjkdf2.yml). Run it from
+this repo's **Actions** tab.
 
 ### Optional inputs
 
