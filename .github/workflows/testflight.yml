@@ -1,0 +1,168 @@
+# Shared workflow: builds, signs and uploads an iOS app to TestFlight.
+# App repos call it with a short file (see templates/app-testflight.yml).
+name: TestFlight (shared)
+
+on:
+  workflow_call:
+    inputs:
+      app_identifier:
+        description: Bundle ID, for example com.sithewok.mygame
+        type: string
+        required: true
+      xcode_project:
+        description: Path to the .xcodeproj, relative to the app repo root
+        type: string
+        required: true
+      scheme:
+        description: Shared Xcode scheme that builds the app
+        type: string
+        required: true
+      target:
+        description: The app target (not a library or extension)
+        type: string
+        required: true
+      app_name:
+        description: Name used if the bundle ID has to be registered (letters, numbers, spaces)
+        type: string
+        default: ""
+      generate_command:
+        description: Optional shell command that generates the Xcode project before building
+        type: string
+        default: ""
+      runner:
+        description: GitHub-hosted macOS runner label
+        type: string
+        default: macos-26
+    secrets:
+      APPLE_TEAM_ID:
+        required: true
+      ASC_KEY_ID:
+        required: true
+      ASC_ISSUER_ID:
+        required: true
+      ASC_KEY_CONTENT:
+        required: true
+      CERTS_REPO_URL:
+        required: true
+      CERTS_REPO_USER:
+        required: true
+      CERTS_REPO_TOKEN:
+        required: true
+      MATCH_PASSWORD:
+        required: true
+
+jobs:
+  testflight:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Install fastlane
+        run: gem install fastlane --no-document
+
+      - name: Generate Xcode project
+        if: inputs.generate_command != ''
+        env:
+          GENERATE_COMMAND: ${{ inputs.generate_command }}
+        run: bash -euo pipefail -c "$GENERATE_COMMAND"
+
+      - name: Build, sign and upload to TestFlight
+        env:
+          APP_IDENTIFIER: ${{ inputs.app_identifier }}
+          APP_NAME: ${{ inputs.app_name }}
+          XCODE_PROJECT: ${{ github.workspace }}/${{ inputs.xcode_project }}
+          XCODE_SCHEME: ${{ inputs.scheme }}
+          XCODE_TARGET: ${{ inputs.target }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          CERTS_REPO_URL: ${{ secrets.CERTS_REPO_URL }}
+          CERTS_REPO_USER: ${{ secrets.CERTS_REPO_USER }}
+          CERTS_REPO_TOKEN: ${{ secrets.CERTS_REPO_TOKEN }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+        run: |
+          # The lane lives here so app repos carry no fastlane files of their own.
+          mkdir -p "$RUNNER_TEMP/pipeline/fastlane"
+          cat > "$RUNNER_TEMP/pipeline/fastlane/Fastfile" <<'EOF'
+          default_platform(:ios)
+
+          platform :ios do
+            lane :beta do
+              setup_ci
+              app_id = ENV["APP_IDENTIFIER"]
+              team = ENV["APPLE_TEAM_ID"]
+
+              api_key = app_store_connect_api_key(
+                key_id: ENV["ASC_KEY_ID"],
+                issuer_id: ENV["ASC_ISSUER_ID"],
+                key_content: ENV["ASC_KEY_CONTENT"]
+              )
+
+              # Register the bundle ID on first use.
+              unless Spaceship::ConnectAPI::BundleId.find(app_id)
+                name = ENV["APP_NAME"].to_s.strip
+                name = app_id if name.empty?
+                name = name.gsub(/[^A-Za-z0-9 ]/, " ").squeeze(" ").strip
+                UI.message("Registering bundle ID #{app_id} as \"#{name}\"")
+                Spaceship::ConnectAPI::BundleId.create(name: name, platform: "IOS", identifier: app_id, seed_id: team)
+              end
+
+              # Apple's API can't create app records, so stop early with the fix.
+              unless Spaceship::ConnectAPI::App.find(app_id)
+                UI.user_error!("No App Store Connect app for #{app_id}. Create it at appstoreconnect.apple.com -> Apps -> + -> New App (bundle ID #{app_id}), then run again.")
+              end
+
+              match(
+                type: "appstore",
+                app_identifier: app_id,
+                team_id: team,
+                api_key: api_key,
+                git_url: ENV["CERTS_REPO_URL"],
+                git_basic_authorization: ["#{ENV['CERTS_REPO_USER']}:#{ENV['CERTS_REPO_TOKEN']}"].pack("m0"),
+                readonly: false
+              )
+              profile = ENV["sigh_#{app_id}_appstore_profile-name"]
+
+              update_code_signing_settings(
+                path: ENV["XCODE_PROJECT"],
+                targets: [ENV["XCODE_TARGET"]],
+                use_automatic_signing: false,
+                team_id: team,
+                code_sign_identity: "Apple Distribution",
+                profile_name: profile,
+                bundle_identifier: app_id
+              )
+
+              build = latest_testflight_build_number(
+                api_key: api_key,
+                app_identifier: app_id,
+                initial_build_number: 0
+              ) + 1
+
+              build_app(
+                project: ENV["XCODE_PROJECT"],
+                scheme: ENV["XCODE_SCHEME"],
+                configuration: "Release",
+                export_method: "app-store",
+                xcargs: "CURRENT_PROJECT_VERSION=#{build}",
+                export_options: { provisioningProfiles: { app_id => profile } }
+              )
+
+              upload_to_testflight(
+                api_key: api_key,
+                app_identifier: app_id,
+                skip_waiting_for_build_processing: true
+              )
+            end
+          end
+          EOF
+          cd "$RUNNER_TEMP/pipeline"
+          fastlane beta

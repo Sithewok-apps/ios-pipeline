@@ -1,0 +1,15 @@
+# Copy to .github/workflows/testflight.yml in an app repo and fill in the four values.
+name: TestFlight
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ship:
+    uses: Sithewok-apps/ios-pipeline/.github/workflows/testflight.yml@main
+    with:
+      app_identifier: com.sithewok.mygame      # bundle ID
+      xcode_project: MyGame.xcodeproj          # path to the .xcodeproj
+      scheme: MyGame                           # shared scheme that builds the app
+      target: MyGame                           # the app target
+    secrets: inherit
