@@ -28,6 +28,14 @@ on:
         description: owner/repo whose release holds the IPA (default the calling repo; another repo must be public)
         type: string
         default: ""
+      artifact_run_id:
+        description: Test build instead of a release - the ID of a source repo run that kept the IPA as a run artifact
+        type: string
+        default: ""
+      artifact_name:
+        description: Name of that run artifact (used with artifact_run_id)
+        type: string
+        default: ""
       icon:
         description: Path in the source repo to a square PNG app icon, ideally 1024 px
         type: string
@@ -96,11 +104,18 @@ jobs:
           SOURCE_REPO: ${{ inputs.source_repo || github.repository }}
           RELEASE_TAG: ${{ inputs.release_tag }}
           IPA_ASSET: ${{ inputs.ipa_asset }}
+          ARTIFACT_RUN: ${{ inputs.artifact_run_id }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
         run: |
           set -euo pipefail
           mkdir -p "$WORK/in"
-          gh release download "$RELEASE_TAG" --repo "$SOURCE_REPO" --pattern "$IPA_ASSET" --dir "$WORK/in"
+          if [ -n "$ARTIFACT_RUN" ]; then
+            gh run download "$ARTIFACT_RUN" --repo "$SOURCE_REPO" --name "$ARTIFACT_NAME" --dir "$WORK/in"
+          else
+            gh release download "$RELEASE_TAG" --repo "$SOURCE_REPO" --pattern "$IPA_ASSET" --dir "$WORK/in"
+          fi
           ls -la "$WORK/in"
+          test -f "$WORK/in/$IPA_ASSET"
 
       - name: Write the fastlane lanes
         run: |

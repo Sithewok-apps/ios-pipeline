@@ -12,6 +12,10 @@ on:
         description: OpenJKDF2-iOS release to send (ios-latest = newest build, or a tag such as v0.9-beta1)
         required: true
         default: ios-latest
+      from_run:
+        description: Or a test build - the ID of a manual run on an exp/ branch in the game's repo (leave empty for the release above)
+        required: false
+        default: ""
 
 jobs:
   jedi-knight:
@@ -22,6 +26,8 @@ jobs:
       app_name: OpenJKDF2
       release_tag: ${{ inputs.release_tag }}
       ipa_asset: OpenJKDF2-iOS-unsigned.ipa
+      artifact_run_id: ${{ inputs.from_run }}
+      artifact_name: OpenJKDF2-iOS-unsigned-ipa
       icon: packaging/icon.png
     secrets: inherit
 
@@ -37,6 +43,8 @@ jobs:
       app_name: OpenMoTS
       release_tag: ${{ inputs.release_tag }}
       ipa_asset: OpenJKDF2-MotS-iOS-unsigned.ipa
+      artifact_run_id: ${{ inputs.from_run }}
+      artifact_name: OpenJKDF2-MotS-iOS-unsigned-ipa
       # Only a 256 px MotS icon exists; it is scaled up to 1024 px.
       icon: packaging/mots_icon-256.png
     secrets: inherit

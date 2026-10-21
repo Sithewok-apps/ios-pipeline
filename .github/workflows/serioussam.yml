@@ -12,6 +12,10 @@ on:
         description: SeriousSamClassic release to send (ios-latest = newest build, or a tag such as ios-v0.3)
         required: true
         default: ios-latest
+      from_run:
+        description: Or a test build - the ID of a manual run on an exp/ branch in the game's repo (leave empty for the release above)
+        required: false
+        default: ""
 
 jobs:
   first-encounter:
@@ -22,6 +26,8 @@ jobs:
       app_name: Sam FE
       release_tag: ${{ inputs.release_tag }}
       ipa_asset: serioussam-ios.ipa
+      artifact_run_id: ${{ inputs.from_run }}
+      artifact_name: serioussam-ios
       # Only 256 px icons exist; they are scaled up to 1024 px.
       icon: SamTFE/serioussam.png
     secrets: inherit
@@ -38,5 +44,7 @@ jobs:
       app_name: Sam SE
       release_tag: ${{ inputs.release_tag }}
       ipa_asset: serioussamse-ios.ipa
+      artifact_run_id: ${{ inputs.from_run }}
+      artifact_name: serioussamse-ios
       icon: SamTSE/serioussamse.png
     secrets: inherit
