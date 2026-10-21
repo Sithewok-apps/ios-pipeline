@@ -1,0 +1,42 @@
+# TestFlight for Serious Sam Classic: The First Encounter (Sam FE) and The
+# Second Encounter (Sam SE). Run it from here: this repo is in Sithewok-apps,
+# so it has the organization's secrets. It takes the IPAs from a public release
+# of sithewok13-dev/SeriousSamClassic (no rebuild, no change to that repo) and
+# ships them as com.sithewok.samfe and com.sithewok.samse.
+name: TestFlight - Serious Sam
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: SeriousSamClassic release to send (ios-latest = newest build, or a tag such as ios-v0.3)
+        required: true
+        default: ios-latest
+
+jobs:
+  first-encounter:
+    uses: ./.github/workflows/testflight-ipa.yml
+    with:
+      source_repo: sithewok13-dev/SeriousSamClassic
+      app_identifier: com.sithewok.samfe
+      app_name: Sam FE
+      release_tag: ${{ inputs.release_tag }}
+      ipa_asset: serioussam-ios.ipa
+      # Only 256 px icons exist; they are scaled up to 1024 px.
+      icon: SamTFE/serioussam.png
+    secrets: inherit
+
+  # After FE, so the two never update the certificates repo at the same time.
+  # Runs even if FE failed.
+  second-encounter:
+    needs: first-encounter
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/testflight-ipa.yml
+    with:
+      source_repo: sithewok13-dev/SeriousSamClassic
+      app_identifier: com.sithewok.samse
+      app_name: Sam SE
+      release_tag: ${{ inputs.release_tag }}
+      ipa_asset: serioussamse-ios.ipa
+      icon: SamTSE/serioussamse.png
+    secrets: inherit
