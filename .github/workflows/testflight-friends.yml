@@ -1,0 +1,85 @@
+# Puts the same testers in every game: makes an internal tester group (named
+# Friends by default, automatic distribution on) in each app that has none,
+# then adds everyone who is in that group in any of the apps to all of them.
+# So: add a friend to one game's group in App Store Connect, run this, and
+# they're in every game. Only adds; never removes anyone. Prints counts, not
+# emails (this repo's logs are public).
+name: TestFlight - Friends
+
+on:
+  workflow_dispatch:
+    inputs:
+      apps:
+        description: Bundle IDs, separated by spaces
+        required: true
+        default: com.sithewok.openjkdf2 com.sithewok.openmots com.sithewok.samfe com.sithewok.samse
+      group:
+        description: Tester group name
+        required: true
+        default: Friends
+
+jobs:
+  friends:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Install fastlane
+        run: gem install fastlane --no-document
+
+      - name: Same testers in every game
+        env:
+          APPS: ${{ inputs.apps }}
+          GROUP: ${{ inputs.group }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/friends/fastlane"
+          cat > "$RUNNER_TEMP/friends/fastlane/Fastfile" <<'EOF'
+          lane :friends do
+            app_store_connect_api_key(
+              key_id: ENV["ASC_KEY_ID"].to_s.strip,
+              issuer_id: ENV["ASC_ISSUER_ID"].to_s.strip,
+              key_content: ENV["ASC_KEY_CONTENT"].to_s.strip
+            )
+            name = ENV["GROUP"].to_s.strip
+            apps = []
+            ENV["APPS"].split.each do |bundle_id|
+              app = Spaceship::ConnectAPI::App.find(bundle_id)
+              if app
+                apps << [bundle_id, app]
+              else
+                puts "STATUS #{bundle_id}: no App Store Connect app, skipped"
+              end
+            end
+
+            # Everyone in a group of this name, in any of the apps
+            groups = {}
+            testers = {}
+            apps.each do |bundle_id, app|
+              g = app.get_beta_groups(includes: "betaTesters").find { |x| x.name == name && x.is_internal_group }
+              groups[bundle_id] = g
+              (g&.beta_testers || []).each { |t| testers[t.id] = true }
+            end
+            puts "STATUS #{testers.size} testers in '#{name}' groups across the apps"
+
+            apps.each do |bundle_id, app|
+              g = groups[bundle_id]
+              unless g
+                g = app.create_beta_group(group_name: name, is_internal_group: true, has_access_to_all_builds: true)
+                puts "STATUS #{bundle_id} (#{app.name}): made the '#{name}' group (automatic distribution)"
+              end
+              have = (g.beta_testers || []).map(&:id)
+              add = testers.keys - have
+              g.add_beta_testers(beta_tester_ids: add) unless add.empty?
+              puts "STATUS #{bundle_id} (#{app.name}): '#{name}' has #{(have + add).uniq.size} testers (added #{add.size})"
+            end
+          end
+          EOF
+          cd "$RUNNER_TEMP/friends"
+          fastlane friends > friends.log 2>&1 || { tail -40 friends.log; exit 1; }
+          grep STATUS friends.log
