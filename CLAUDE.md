@@ -14,6 +14,10 @@ call it, they don't copy it.
 
 ## Steps
 
+If the app isn't an Xcode project but its CI publishes an unsigned `.ipa`
+release asset, use `testflight-ipa.yml` instead (README, "Apps built outside
+Xcode"); steps 2 and 4 then don't apply.
+
 1. Read the app repo's own instructions (`AGENTS.md`, `CLAUDE.md`) first.
 2. Find the values for the caller file:
    - `xcode_project`: the `.xcodeproj` path. If the project is generated

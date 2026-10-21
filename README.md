@@ -67,6 +67,30 @@ Save every value marked **SAVE** in a password manager.
 Or ask Claude: *"Set up TestFlight for Sithewok-apps/REPO using
 Sithewok-apps/ios-pipeline."* The steps it follows are in [CLAUDE.md](CLAUDE.md).
 
+### Apps built outside Xcode (CMake ports)
+
+If the app's own CI already publishes an unsigned `.ipa` as a GitHub release
+asset, use `testflight-ipa.yml` instead. It downloads that IPA, sets the bundle
+ID and build number, adds the Xcode/SDK keys and an App Store icon set (from one
+1024 px PNG), signs it, and uploads it. No rebuild, so a run takes minutes.
+
+```yaml
+jobs:
+  ship:
+    uses: Sithewok-apps/ios-pipeline/.github/workflows/testflight-ipa.yml@main
+    with:
+      app_identifier: com.sithewok.mygame
+      app_name: My Game
+      release_tag: ios-latest                 # release holding the IPA
+      ipa_asset: MyGame-unsigned.ipa          # its file name
+      icon: packaging/icon.png                # square PNG, ideally 1024 px
+    secrets: inherit
+```
+
+A repo outside Sithewok-apps can't use `secrets: inherit` with the
+organization's secrets: add the eight secrets to that repo and pass them by name
+(see `sithewok13-dev/OpenJKDF2-iOS`, `.github/workflows/testflight.yml`).
+
 ### Optional inputs
 
 | Input | Default | Use |

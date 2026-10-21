@@ -1,0 +1,245 @@
+# Shared workflow: signs an unsigned .ipa that the app repo already publishes
+# as a GitHub release asset, and uploads it to TestFlight. For ports built
+# outside Xcode (CMake, make) whose CI makes an unsigned or ad-hoc-signed IPA.
+#
+# Before signing it makes the IPA acceptable to App Store Connect:
+#   - sets the bundle ID and a new build number
+#   - adds the Xcode/SDK keys (DT*) that non-Xcode builds leave out
+#   - compiles an App Store icon set from one 1024 px PNG (alpha removed)
+#   - embeds the App Store profile and signs with its entitlements
+name: TestFlight from release IPA (shared)
+
+on:
+  workflow_call:
+    inputs:
+      app_identifier:
+        description: Bundle ID to ship under, for example com.sithewok.mygame
+        type: string
+        required: true
+      release_tag:
+        description: Release tag that holds the IPA (for example ios-latest or v1.0)
+        type: string
+        required: true
+      ipa_asset:
+        description: File name of the IPA asset in that release
+        type: string
+        required: true
+      icon:
+        description: Path in the app repo to a square PNG app icon, ideally 1024 px
+        type: string
+        required: true
+      app_name:
+        description: Name used if the bundle ID has to be registered (letters, numbers, spaces)
+        type: string
+        default: ""
+      runner:
+        description: GitHub-hosted macOS runner label
+        type: string
+        default: macos-26
+    secrets:
+      APPLE_TEAM_ID:
+        required: true
+      ASC_KEY_ID:
+        required: true
+      ASC_ISSUER_ID:
+        required: true
+      ASC_KEY_CONTENT:
+        required: true
+      CERTS_REPO_URL:
+        required: true
+      CERTS_REPO_USER:
+        required: true
+      CERTS_REPO_TOKEN:
+        required: true
+      MATCH_PASSWORD:
+        required: true
+
+jobs:
+  testflight:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+    env:
+      APP_IDENTIFIER: ${{ inputs.app_identifier }}
+      APP_NAME: ${{ inputs.app_name }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+      CERTS_REPO_URL: ${{ secrets.CERTS_REPO_URL }}
+      CERTS_REPO_USER: ${{ secrets.CERTS_REPO_USER }}
+      CERTS_REPO_TOKEN: ${{ secrets.CERTS_REPO_TOKEN }}
+      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+    steps:
+      - name: Set the work folder
+        run: echo "WORK=$RUNNER_TEMP/ship" >> "$GITHUB_ENV"
+
+      # Only the icon is needed from the app repo, so no submodules.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Install fastlane
+        run: gem install fastlane --no-document
+
+      - name: Download the IPA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          IPA_ASSET: ${{ inputs.ipa_asset }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$WORK/in"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$IPA_ASSET" --dir "$WORK/in"
+          ls -la "$WORK/in"
+
+      - name: Write the fastlane lanes
+        run: |
+          mkdir -p "$WORK/fastlane"
+          cat > "$WORK/fastlane/Fastfile" <<'EOF'
+          default_platform(:ios)
+
+          def asc_key
+            app_store_connect_api_key(
+              key_id: ENV["ASC_KEY_ID"],
+              issuer_id: ENV["ASC_ISSUER_ID"],
+              key_content: ENV["ASC_KEY_CONTENT"]
+            )
+          end
+
+          # Hands a value to the later workflow steps.
+          def export_env(name, value)
+            File.open(ENV["GITHUB_ENV"], "a") { |f| f.puts("#{name}=#{value}") }
+          end
+
+          platform :ios do
+            # Bundle ID, app record check, certificate and profile, next build number.
+            lane :prepare do
+              setup_ci
+              app_id = ENV["APP_IDENTIFIER"]
+              team = ENV["APPLE_TEAM_ID"]
+              key = asc_key
+
+              unless Spaceship::ConnectAPI::BundleId.find(app_id)
+                name = ENV["APP_NAME"].to_s.strip
+                name = app_id if name.empty?
+                name = name.gsub(/[^A-Za-z0-9 ]/, " ").squeeze(" ").strip
+                UI.message("Registering bundle ID #{app_id} as \"#{name}\"")
+                Spaceship::ConnectAPI::BundleId.create(name: name, platform: "IOS", identifier: app_id, seed_id: team)
+              end
+
+              unless Spaceship::ConnectAPI::App.find(app_id)
+                UI.user_error!("No App Store Connect app for #{app_id}. Create it at appstoreconnect.apple.com -> Apps -> + -> New App (bundle ID #{app_id}), then run again.")
+              end
+
+              match(
+                type: "appstore",
+                app_identifier: app_id,
+                team_id: team,
+                api_key: key,
+                git_url: ENV["CERTS_REPO_URL"],
+                git_basic_authorization: ["#{ENV['CERTS_REPO_USER']}:#{ENV['CERTS_REPO_TOKEN']}"].pack("m0"),
+                readonly: false
+              )
+
+              build = latest_testflight_build_number(
+                api_key: key,
+                app_identifier: app_id,
+                initial_build_number: 0
+              ) + 1
+
+              export_env("SIGN_IDENTITY", ENV["sigh_#{app_id}_appstore_certificate-name"])
+              export_env("PROFILE_PATH", ENV["sigh_#{app_id}_appstore_profile-path"])
+              export_env("BUILD_NUMBER", build)
+              export_env("KEYCHAIN_PATH", File.expand_path("~/Library/Keychains/fastlane_tmp_keychain-db"))
+            end
+
+            lane :upload do
+              upload_to_testflight(
+                api_key: asc_key,
+                app_identifier: ENV["APP_IDENTIFIER"],
+                ipa: ENV["SIGNED_IPA"],
+                skip_waiting_for_build_processing: true
+              )
+            end
+          end
+          EOF
+
+      - name: Prepare signing
+        working-directory: ${{ runner.temp }}/ship
+        run: fastlane prepare
+
+      - name: Make the IPA App Store ready and sign it
+        env:
+          ICON_PNG: ${{ github.workspace }}/${{ inputs.icon }}
+          IPA_ASSET: ${{ inputs.ipa_asset }}
+        run: |
+          set -euo pipefail
+          cd "$WORK"
+          rm -rf unpacked && mkdir unpacked && cd unpacked
+          unzip -q "$WORK/in/$IPA_ASSET"
+          APP=$(ls -d Payload/*.app)
+          PL="$APP/Info.plist"
+          EXE=$(plutil -extract CFBundleExecutable raw -o - "$PL")
+          MINOS=$(plutil -extract MinimumOSVersion raw -o - "$PL")
+
+          plutil -replace CFBundleIdentifier -string "$APP_IDENTIFIER" "$PL"
+          plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$PL"
+
+          # Xcode/SDK keys. The SDK version is the one the binary was linked
+          # against; the build numbers come from this runner's Xcode.
+          BIN_SDK=$(xcrun vtool -show-build "$APP/$EXE" | awk '$1 == "sdk" { print $2; exit }')
+          SDK_BUILD=$(xcrun --sdk iphoneos --show-sdk-build-version)
+          XCODE_VER=$(xcodebuild -version | awk 'NR == 1 { print $2 }')
+          XCODE_BUILD=$(xcodebuild -version | awk 'NR == 2 { print $3 }')
+          DT_XCODE=$(echo "$XCODE_VER" | awk -F. '{ printf "%d%d%d", $1, $2, ($3 == "" ? 0 : $3) }')
+          echo "Binary SDK $BIN_SDK, Xcode $XCODE_VER ($XCODE_BUILD), SDK build $SDK_BUILD"
+          for kv in "DTPlatformName=iphoneos" "DTPlatformVersion=$BIN_SDK" "DTSDKName=iphoneos$BIN_SDK" \
+                    "DTPlatformBuild=$SDK_BUILD" "DTSDKBuild=$SDK_BUILD" "DTXcode=$DT_XCODE" \
+                    "DTXcodeBuild=$XCODE_BUILD" "DTCompiler=com.apple.compilers.llvm.clang.1_0" \
+                    "BuildMachineOSBuild=$(sw_vers -buildVersion)"; do
+            plutil -replace "${kv%%=*}" -string "${kv#*=}" "$PL"
+          done
+
+          # App Store icon set from one opaque 1024 px PNG.
+          ICONS="$WORK/icons"
+          rm -rf "$ICONS" && mkdir -p "$ICONS/Assets.xcassets/AppIcon.appiconset"
+          sips -z 1024 1024 -s format jpeg "$ICON_PNG" --out "$ICONS/flat.jpg" >/dev/null
+          sips -s format png "$ICONS/flat.jpg" --out "$ICONS/Assets.xcassets/AppIcon.appiconset/Icon-1024.png" >/dev/null
+          cat > "$ICONS/Assets.xcassets/AppIcon.appiconset/Contents.json" <<'JSON'
+          {"images":[{"filename":"Icon-1024.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}
+          JSON
+          xcrun actool "$ICONS/Assets.xcassets" --compile "$APP" --platform iphoneos \
+            --minimum-deployment-target "$MINOS" --app-icon AppIcon \
+            --target-device iphone --target-device ipad \
+            --output-partial-info-plist "$ICONS/partial.plist" --output-format human-readable-text
+          plutil -remove CFBundleIconFile "$PL" 2>/dev/null || true
+          plutil -remove CFBundleIcons "$PL" 2>/dev/null || true
+          plutil -remove 'CFBundleIcons~ipad' "$PL" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Merge $ICONS/partial.plist" "$PL"
+
+          # Profile and its entitlements (no get-task-allow in an App Store profile).
+          cp "$PROFILE_PATH" "$APP/embedded.mobileprovision"
+          security cms -D -i "$PROFILE_PATH" > "$WORK/profile.plist"
+          /usr/libexec/PlistBuddy -x -c "Print :Entitlements" "$WORK/profile.plist" > "$WORK/entitlements.plist"
+
+          # Sign inside-out: embedded code first, then the app.
+          if [ -d "$APP/Frameworks" ]; then
+            find "$APP/Frameworks" -maxdepth 1 \( -name '*.dylib' -o -name '*.framework' \) | while read -r item; do
+              codesign --force --sign "$SIGN_IDENTITY" --keychain "$KEYCHAIN_PATH" "$item"
+            done
+          fi
+          codesign --force --sign "$SIGN_IDENTITY" --keychain "$KEYCHAIN_PATH" \
+            --entitlements "$WORK/entitlements.plist" --generate-entitlement-der "$APP"
+          codesign --verify --deep --strict "$APP"
+          plutil -p "$PL" | grep -E 'CFBundleIdentifier|CFBundleShortVersionString|CFBundleVersion|DTSDKName|DTXcode|CFBundleIcons'
+
+          zip -qry "$WORK/signed.ipa" Payload
+          echo "SIGNED_IPA=$WORK/signed.ipa" >> "$GITHUB_ENV"
+
+      - name: Upload to TestFlight
+        working-directory: ${{ runner.temp }}/ship
+        run: fastlane upload
