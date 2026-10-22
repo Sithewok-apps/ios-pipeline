@@ -1,0 +1,106 @@
+# Signs an .ipa from a web link with the sideloading kit (the account's
+# distribution certificate and the wildcard Ad Hoc profile) and puts it on the
+# install page (install-links.yml), so it installs on any registered iPhone
+# without a signing app. For apps you're allowed to share: the signed file is
+# downloadable by anyone with the link (only registered iPhones can install it).
+name: Sign from link
+
+on:
+  workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: Link to the .ipa (for example https://github.com/claration/feather/releases/latest/download/Feather.ipa)
+        required: true
+      name:
+        description: Short name for the install page (letters, numbers, dashes)
+        required: true
+
+permissions:
+  contents: write  # the install release
+  actions: write   # rebuild the install page
+
+jobs:
+  sign:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+      CERTS_REPO_URL: ${{ secrets.CERTS_REPO_URL }}
+      CERTS_REPO_USER: ${{ secrets.CERTS_REPO_USER }}
+      CERTS_REPO_TOKEN: ${{ secrets.CERTS_REPO_TOKEN }}
+      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download the app
+        env:
+          IPA_URL: ${{ inputs.ipa_url }}
+          NAME: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          SLUG=$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-' | sed 's/^-*//; s/-*$//')
+          [ -n "$SLUG" ] || { echo "::error::Give the app a name"; exit 1; }
+          echo "SLUG=$SLUG" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/sign"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/sign/app.ipa" "$IPA_URL"
+          unzip -l "$RUNNER_TEMP/sign/app.ipa" | grep -qE 'Payload/[^/]+\.app/Info\.plist' \
+            || { echo "::error::That link isn't an .ipa"; exit 1; }
+          ls -la "$RUNNER_TEMP/sign"
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Install fastlane
+        run: gem install fastlane --no-document
+
+      - name: Sign with the sideloading kit
+        run: |
+          mkdir -p "$RUNNER_TEMP/sign/fastlane"
+          cat > "$RUNNER_TEMP/sign/fastlane/Fastfile" <<'EOF'
+          %w[APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_CONTENT CERTS_REPO_URL
+             CERTS_REPO_USER CERTS_REPO_TOKEN MATCH_PASSWORD].each { |k| ENV[k] = ENV[k].to_s.strip }
+
+          lane :sign do
+            setup_ci
+            key = app_store_connect_api_key(
+              key_id: ENV["ASC_KEY_ID"],
+              issuer_id: ENV["ASC_ISSUER_ID"],
+              key_content: ENV["ASC_KEY_CONTENT"]
+            )
+            match(
+              type: "adhoc",
+              app_identifier: "*",
+              team_id: ENV["APPLE_TEAM_ID"],
+              api_key: key,
+              git_url: ENV["CERTS_REPO_URL"],
+              git_basic_authorization: ["#{ENV['CERTS_REPO_USER']}:#{ENV['CERTS_REPO_TOKEN']}"].pack("m0"),
+              readonly: true
+            )
+            resign(
+              ipa: File.expand_path("../app.ipa"),
+              signing_identity: ENV["sigh_*_adhoc_certificate-name"],
+              provisioning_profile: ENV["sigh_*_adhoc_profile-path"],
+              keychain_path: File.expand_path("~/Library/Keychains/fastlane_tmp_keychain-db")
+            )
+          end
+          EOF
+          cd "$RUNNER_TEMP/sign"
+          status=0
+          fastlane sign > sign.log 2>&1 || status=$?
+          if [ "$status" != 0 ]; then grep -E "\[!\]|rror" sign.log | tail -8; exit "$status"; fi
+          echo "Signed"
+
+      - name: Put it on the install page
+        run: |
+          set -euo pipefail
+          TAG="install-$SLUG-$(date -u +%Y%m%d%H%M)"
+          cp "$RUNNER_TEMP/sign/app.ipa" "$RUNNER_TEMP/sign/$SLUG.ipa"
+          gh release create "$TAG" "$RUNNER_TEMP/sign/$SLUG.ipa" --repo "$GITHUB_REPOSITORY" \
+            --title "$SLUG (signed $(date -u +%Y-%m-%d))" --notes "Signed with the sideloading kit. Install page: https://sithewok-apps.github.io/ios-pipeline/"
+          # A release made with this workflow's token doesn't start other
+          # workflows by itself, so rebuild the page directly
+          gh workflow run install-links.yml --repo "$GITHUB_REPOSITORY" --ref main
+          echo "Done: in a minute it's on https://sithewok-apps.github.io/ios-pipeline/"
