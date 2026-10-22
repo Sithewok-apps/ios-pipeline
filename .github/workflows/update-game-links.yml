@@ -45,6 +45,11 @@ jobs:
       WORK: ${{ github.workspace }}/games
       GAMES: ${{ inputs.games || 'openjkdf2 openmots sam-fe sam-se' }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pipeline
+          sparse-checkout: .github/scripts
+
       - name: Download the games
         env:
           JK_RUN: ${{ inputs.openjkdf2_run }}
@@ -104,12 +109,11 @@ jobs:
               readonly: true
             )
             ENV["GAMES"].split.each do |slug|
-              resign(
-                ipa: File.join(ENV["WORK"], "#{slug}.ipa"),
-                signing_identity: ENV["sigh_*_adhoc_certificate-name"],
-                provisioning_profile: ENV["sigh_*_adhoc_profile-path"],
-                keychain_path: File.expand_path("~/Library/Keychains/fastlane_tmp_keychain-db")
-              )
+              sh(File.join(ENV["GITHUB_WORKSPACE"], "pipeline/.github/scripts/sign-ipa.sh"),
+                 File.join(ENV["WORK"], "#{slug}.ipa"),
+                 ENV["sigh_*_adhoc_certificate-name"],
+                 ENV["sigh_*_adhoc_profile-path"],
+                 File.expand_path("~/Library/Keychains/fastlane_tmp_keychain-db"))
               UI.message("Signed #{slug}")
             end
           end

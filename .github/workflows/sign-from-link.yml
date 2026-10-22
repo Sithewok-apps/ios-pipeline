@@ -34,6 +34,11 @@ jobs:
       MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pipeline
+          sparse-checkout: .github/scripts
+
       - name: Download the app
         env:
           IPA_URL: ${{ inputs.ipa_url }}
@@ -79,12 +84,11 @@ jobs:
               git_basic_authorization: ["#{ENV['CERTS_REPO_USER']}:#{ENV['CERTS_REPO_TOKEN']}"].pack("m0"),
               readonly: true
             )
-            resign(
-              ipa: File.expand_path("../app.ipa"),
-              signing_identity: ENV["sigh_*_adhoc_certificate-name"],
-              provisioning_profile: ENV["sigh_*_adhoc_profile-path"],
-              keychain_path: File.expand_path("~/Library/Keychains/fastlane_tmp_keychain-db")
-            )
+            sh(File.join(ENV["GITHUB_WORKSPACE"], "pipeline/.github/scripts/sign-ipa.sh"),
+               File.expand_path("../app.ipa"),
+               ENV["sigh_*_adhoc_certificate-name"],
+               ENV["sigh_*_adhoc_profile-path"],
+               File.expand_path("~/Library/Keychains/fastlane_tmp_keychain-db"))
           end
           EOF
           cd "$RUNNER_TEMP/sign"
