@@ -121,6 +121,10 @@ jobs:
         if: env.RENEW == '1'
         run: |
           set -euo pipefail
+          # Secrets pasted on a phone can carry a stray space or line break
+          for v in CERTS_REPO_URL CERTS_REPO_USER CERTS_REPO_TOKEN MATCH_PASSWORD; do
+            printf -v "$v" '%s' "$(printf '%s' "${!v}" | tr -d '\r\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+          done
           OUT="$RUNNER_TEMP/kitfiles"
           mkdir -p "$OUT"
           security export -k "$KEYCHAIN_PATH" -t identities -f pkcs12 -P "$MATCH_PASSWORD" -o "$OUT/Sideload.p12"
