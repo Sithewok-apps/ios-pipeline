@@ -109,6 +109,22 @@ with **automatic distribution**, and add them. Up to 100 people, no review. For
 a public link, use **External Testing**; Apple reviews the first build of each
 version.
 
+## Sideloading kit (Feather, ESign)
+
+Sign any app for your own registered devices with your own account, no
+service needed:
+
+1. **Register device** (Actions): a name and the device's UDID (udid.tech
+   shows it). Up to 100 iPhones a year.
+2. **Make signing kit** (Actions): saves `Sideload.p12` (password: your Match
+   passphrase) and `Sideload.mobileprovision` (any app, every registered
+   device, one year) in the private `ios-certificates` repo, folder `sideload`.
+3. On the phone, open those two files from GitHub in Safari and import them
+   into the signing app. Run step 2 again after adding a device.
+
+Only for apps you have the right to install (your own, open-source, ones you
+obtained legitimately). The kit can sign as you: keep it private.
+
 ## Troubleshooting
 
 | What you see | Fix |

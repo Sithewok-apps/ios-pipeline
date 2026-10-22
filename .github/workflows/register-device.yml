@@ -1,0 +1,70 @@
+# Registers an iPhone or iPad on the Apple developer account, so the signing
+# kit (make-signing-kit.yml) can install apps on it. Run "Make signing kit"
+# again afterwards so its profile includes the new device. The UDID is masked
+# in the log (this repo's logs are public).
+name: Register device
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: A name for the device, for example "My iPhone 17"
+        required: true
+      udid:
+        description: The device's UDID (from udid.tech or Finder)
+        required: true
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read the UDID without printing it
+        run: |
+          UDID=$(jq -r '.inputs.udid' "$GITHUB_EVENT_PATH" | tr -d ' \t\r\n')
+          echo "::add-mask::$UDID"
+          if ! printf '%s' "$UDID" | grep -Eq '^[0-9A-Fa-f-]{24,40}$'; then
+            echo "::error::That doesn't look like a UDID (24-40 letters A-F, digits and dashes)."
+            exit 1
+          fi
+          echo "DEVICE_UDID=$UDID" >> "$GITHUB_ENV"
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Install fastlane
+        run: gem install fastlane --no-document
+
+      - name: Register it
+        env:
+          DEVICE_NAME: ${{ inputs.name }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/dev/fastlane"
+          cat > "$RUNNER_TEMP/dev/fastlane/Fastfile" <<'EOF'
+          lane :register do
+            app_store_connect_api_key(
+              key_id: ENV["ASC_KEY_ID"].to_s.strip,
+              issuer_id: ENV["ASC_ISSUER_ID"].to_s.strip,
+              key_content: ENV["ASC_KEY_CONTENT"].to_s.strip
+            )
+            udid = ENV["DEVICE_UDID"]
+            name = ENV["DEVICE_NAME"].to_s.strip
+            if (d = Spaceship::ConnectAPI::Device.find_by_udid(udid, include_disabled: true))
+              puts "STATUS Already registered as \"#{d.name}\" (#{d.enabled? ? 'enabled' : 'disabled'})"
+            else
+              Spaceship::ConnectAPI::Device.create(name: name, platform: "IOS", udid: udid)
+              puts "STATUS Registered \"#{name}\""
+            end
+            all = Spaceship::ConnectAPI::Device.all.select { |x| x.enabled? }
+            puts "STATUS #{all.size} devices on the account. Now run Make signing kit to include it."
+          end
+          EOF
+          cd "$RUNNER_TEMP/dev"
+          status=0
+          fastlane register > dev.log 2>&1 || status=$?
+          grep STATUS dev.log || true
+          if [ "$status" != 0 ]; then grep -E "\[!\]" dev.log | tail -3; exit "$status"; fi

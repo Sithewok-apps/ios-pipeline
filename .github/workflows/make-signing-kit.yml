@@ -1,0 +1,106 @@
+# Makes a sideloading kit for a signing app on the phone (Feather, ESign...):
+# Sideload.p12 (the account's Apple Distribution certificate and key, with the
+# MATCH_PASSWORD passphrase) and Sideload.mobileprovision (an Ad Hoc profile
+# for any bundle ID, on every registered device, valid for a year). Both go in
+# the private ios-certificates repo, folder "sideload", never in this public
+# repo or its logs. Run again after registering a device or when the profile
+# expires.
+name: Make signing kit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  kit:
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+      CERTS_REPO_URL: ${{ secrets.CERTS_REPO_URL }}
+      CERTS_REPO_USER: ${{ secrets.CERTS_REPO_USER }}
+      CERTS_REPO_TOKEN: ${{ secrets.CERTS_REPO_TOKEN }}
+      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+    steps:
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Install fastlane
+        run: gem install fastlane --no-document
+
+      - name: Certificate and wildcard Ad Hoc profile
+        run: |
+          mkdir -p "$RUNNER_TEMP/kit/fastlane"
+          cat > "$RUNNER_TEMP/kit/fastlane/Fastfile" <<'EOF'
+          %w[APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_CONTENT CERTS_REPO_URL
+             CERTS_REPO_USER CERTS_REPO_TOKEN MATCH_PASSWORD].each { |k| ENV[k] = ENV[k].to_s.strip }
+
+          lane :kit do
+            setup_ci
+            team = ENV["APPLE_TEAM_ID"]
+            key = app_store_connect_api_key(
+              key_id: ENV["ASC_KEY_ID"],
+              issuer_id: ENV["ASC_ISSUER_ID"],
+              key_content: ENV["ASC_KEY_CONTENT"]
+            )
+            devices = Spaceship::ConnectAPI::Device.all.select { |d| d.enabled? && d.platform == "IOS" }
+            UI.user_error!("No devices registered yet. Run Register device first.") if devices.empty?
+
+            # One App ID that covers every app
+            unless Spaceship::ConnectAPI::BundleId.find("*")
+              Spaceship::ConnectAPI::BundleId.create(name: "Sideload Wildcard", platform: "IOS", identifier: "*", seed_id: team)
+              UI.message("Made the wildcard App ID")
+            end
+
+            match(
+              type: "adhoc",
+              app_identifier: "*",
+              team_id: team,
+              api_key: key,
+              git_url: ENV["CERTS_REPO_URL"],
+              git_basic_authorization: ["#{ENV['CERTS_REPO_USER']}:#{ENV['CERTS_REPO_TOKEN']}"].pack("m0"),
+              readonly: false,
+              force_for_new_devices: true
+            )
+            File.open(ENV["GITHUB_ENV"], "a") do |f|
+              f.puts("PROFILE_PATH=#{ENV['sigh_*_adhoc_profile-path']}")
+              f.puts("KEYCHAIN_PATH=#{File.expand_path('~/Library/Keychains/fastlane_tmp_keychain-db')}")
+            end
+            puts "STATUS Ad Hoc profile for any app on #{devices.size} device(s)"
+          end
+          EOF
+          cd "$RUNNER_TEMP/kit"
+          status=0
+          fastlane kit > kit.log 2>&1 || status=$?
+          grep STATUS kit.log || true
+          if [ "$status" != 0 ]; then grep -E "\[!\]" kit.log | tail -5; exit "$status"; fi
+
+      - name: Save the kit in ios-certificates
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/kitfiles"
+          mkdir -p "$OUT"
+          security export -k "$KEYCHAIN_PATH" -t identities -f pkcs12 -P "$MATCH_PASSWORD" -o "$OUT/Sideload.p12"
+          cp "$PROFILE_PATH" "$OUT/Sideload.mobileprovision"
+          EXPIRES=$(security cms -D -i "$OUT/Sideload.mobileprovision" | plutil -extract ExpirationDate raw -o - -)
+
+          AUTH=$(printf '%s:%s' "$CERTS_REPO_USER" "$CERTS_REPO_TOKEN" | base64 | tr -d '\n')
+          echo "::add-mask::$AUTH"
+          git -c http.extraheader="Authorization: Basic $AUTH" clone -q --depth 1 "$CERTS_REPO_URL" "$RUNNER_TEMP/certs"
+          cd "$RUNNER_TEMP/certs"
+          mkdir -p sideload
+          cp "$OUT/Sideload.p12" "$OUT/Sideload.mobileprovision" sideload/
+          printf 'Sideload kit for Feather or ESign.\n\nSideload.p12: certificate; its password is your Match passphrase.\nSideload.mobileprovision: any app, on every registered device. Expires %s.\n' "$EXPIRES" > sideload/README.txt
+          git config user.name "ios-pipeline"
+          git config user.email "ios-pipeline@users.noreply.github.com"
+          git add sideload
+          if git diff --cached --quiet; then
+            echo "The kit in ios-certificates is already up to date"
+          else
+            git commit -q -m "Sideload kit (expires $EXPIRES)"
+            git -c http.extraheader="Authorization: Basic $AUTH" push -q origin HEAD
+            echo "Saved the kit in ios-certificates/sideload (expires $EXPIRES)"
+          fi
