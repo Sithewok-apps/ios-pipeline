@@ -1,9 +1,10 @@
 # Makes a sideloading kit for a signing app on the phone (Feather, ESign...):
 # Sideload.p12 (the account's Apple Distribution certificate and key, with the
 # MATCH_PASSWORD passphrase) and Sideload.mobileprovision (an Ad Hoc profile
-# for any bundle ID, on every registered device, valid for a year). Both go in
-# the private ios-certificates repo, folder "sideload", never in this public
-# repo or its logs. Run it by hand after registering a device. It also runs by
+# for any bundle ID, on every registered device, valid for a year). Both go on
+# the "sideload" branch of the private ios-certificates repo (match decrypts
+# every file on its own branch, so the kit must stay off it), never in this
+# public repo or its logs. Run it by hand after registering a device. It also runs by
 # itself once a month and renews the kit when the profile has less than 45 days
 # left, then opens an issue here (GitHub emails it) saying the new kit is ready.
 name: Make signing kit
@@ -39,6 +40,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow enable make-signing-kit.yml --repo "$GITHUB_REPOSITORY" || true
 
+      # match decrypts every file on the certificates branch, so nothing else
+      # may live there (an earlier version of this workflow put the kit there)
+      - name: Keep the certificates branch match-only
+        run: |
+          set -euo pipefail
+          AUTH=$(printf '%s:%s' "$(echo "$CERTS_REPO_USER" | tr -d ' \r\n')" "$(echo "$CERTS_REPO_TOKEN" | tr -d ' \r\n')" | base64 | tr -d '\n')
+          echo "::add-mask::$AUTH"
+          git -c http.extraheader="Authorization: Basic $AUTH" clone -q --depth 1 "$(echo "$CERTS_REPO_URL" | tr -d ' \r\n')" "$RUNNER_TEMP/clean"
+          cd "$RUNNER_TEMP/clean"
+          if [ -e sideload ]; then
+            git config user.name "ios-pipeline"
+            git config user.email "ios-pipeline@users.noreply.github.com"
+            git rm -rq sideload
+            git commit -q -m "Move the sideload kit to its own branch (match reads every file here)"
+            git -c http.extraheader="Authorization: Basic $AUTH" push -q origin HEAD
+            echo "Moved the old kit off the certificates branch"
+          fi
+
       - name: Renew now?
         run: |
           set -euo pipefail
@@ -48,8 +67,12 @@ jobs:
           fi
           AUTH=$(printf '%s:%s' "$(echo "$CERTS_REPO_USER" | tr -d ' \r\n')" "$(echo "$CERTS_REPO_TOKEN" | tr -d ' \r\n')" | base64 | tr -d '\n')
           echo "::add-mask::$AUTH"
-          git -c http.extraheader="Authorization: Basic $AUTH" clone -q --depth 1 "$(echo "$CERTS_REPO_URL" | tr -d ' \r\n')" "$RUNNER_TEMP/check"
-          PROF="$RUNNER_TEMP/check/sideload/Sideload.mobileprovision"
+          if ! git -c http.extraheader="Authorization: Basic $AUTH" clone -q --depth 1 --branch sideload "$(echo "$CERTS_REPO_URL" | tr -d ' \r\n')" "$RUNNER_TEMP/check"; then
+            echo "No kit made yet; nothing to renew."
+            echo "RENEW=0" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          PROF="$RUNNER_TEMP/check/Sideload.mobileprovision"
           if [ ! -f "$PROF" ]; then
             echo "No kit made yet; nothing to renew."
             echo "RENEW=0" >> "$GITHUB_ENV"
@@ -143,18 +166,24 @@ jobs:
           echo "::add-mask::$AUTH"
           git -c http.extraheader="Authorization: Basic $AUTH" clone -q --depth 1 "$CERTS_REPO_URL" "$RUNNER_TEMP/certs"
           cd "$RUNNER_TEMP/certs"
-          mkdir -p sideload
-          cp "$OUT/Sideload.p12" "$OUT/Sideload.mobileprovision" sideload/
-          printf 'Sideload kit for Feather or ESign.\n\nSideload.p12: certificate; its password is your Match passphrase.\nSideload.mobileprovision: any app, on every registered device. Expires %s.\n' "$EXPIRES" > sideload/README.txt
           git config user.name "ios-pipeline"
           git config user.email "ios-pipeline@users.noreply.github.com"
-          git add sideload
+          if git -c http.extraheader="Authorization: Basic $AUTH" fetch -q --depth 1 origin sideload; then
+            git checkout -q -B sideload FETCH_HEAD
+          else
+            git checkout -q --orphan sideload
+            git rm -rqf --cached . >/dev/null
+            find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          fi
+          cp "$OUT/Sideload.p12" "$OUT/Sideload.mobileprovision" .
+          printf 'Sideload kit for Feather or ESign.\n\nSideload.p12: certificate; its password is your Match passphrase.\nSideload.mobileprovision: any app, on every registered device. Expires %s.\n' "$EXPIRES" > README.txt
+          git add Sideload.p12 Sideload.mobileprovision README.txt
           if git diff --cached --quiet; then
             echo "The kit in ios-certificates is already up to date"
           else
             git commit -q -m "Sideload kit (expires $EXPIRES)"
-            git -c http.extraheader="Authorization: Basic $AUTH" push -q origin HEAD
-            echo "Saved the kit in ios-certificates/sideload (expires $EXPIRES)"
+            git -c http.extraheader="Authorization: Basic $AUTH" push -q origin sideload
+            echo "Saved the kit on the sideload branch of ios-certificates (expires $EXPIRES)"
           fi
           echo "KIT_EXPIRES=$EXPIRES" >> "$GITHUB_ENV"
 
@@ -165,7 +194,7 @@ jobs:
         run: |
           gh issue create --repo "$GITHUB_REPOSITORY" --title "New signing kit ready (expires ${KIT_EXPIRES%%T*})" --body "The sideloading kit was renewed automatically.
 
-          1. In Safari, open github.com/Sithewok-apps/ios-certificates, folder **sideload**, and download Sideload.p12 and Sideload.mobileprovision.
+          1. In Safari, open github.com/Sithewok-apps/ios-certificates/tree/sideload and download Sideload.p12 and Sideload.mobileprovision.
           2. Import both into Feather (the .p12 password is your Match passphrase).
           3. Re-sign your apps in Feather and install them again.
 

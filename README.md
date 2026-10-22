@@ -118,7 +118,8 @@ service needed:
    shows it). Up to 100 iPhones a year.
 2. **Make signing kit** (Actions): saves `Sideload.p12` (password: your Match
    passphrase) and `Sideload.mobileprovision` (any app, every registered
-   device, one year) in the private `ios-certificates` repo, folder `sideload`.
+   device, one year) on the `sideload` branch of the private `ios-certificates`
+   repo (github.com/Sithewok-apps/ios-certificates/tree/sideload).
 3. On the phone, open those two files from GitHub in Safari and import them
    into the signing app. Run step 2 again after adding a device.
 
