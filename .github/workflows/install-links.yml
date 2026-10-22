@@ -4,7 +4,8 @@
 # https://sithewok-apps.github.io/ios-pipeline/
 # Only iPhones registered on the account can install it, but anyone with the
 # link can download the file, so it's for apps you're allowed to share. Links
-# are removed after 30 days (checked weekly).
+# are removed after 30 days (checked weekly), except the games
+# (install-game-*, from update-game-links.yml), which stay until replaced.
 name: Install links
 
 on:
@@ -40,7 +41,7 @@ jobs:
         run: |
           cutoff=$(date -u -d '30 days ago' +%s)
           gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName,createdAt \
-            --jq '.[] | select(.tagName | startswith("install-")) | "\(.tagName) \(.createdAt)"' |
+            --jq '.[] | select((.tagName | startswith("install-")) and (.tagName | startswith("install-game-") | not)) | "\(.tagName) \(.createdAt)"' |
           while read -r tag created; do
             if [ "$(date -u -d "$created" +%s)" -lt "$cutoff" ]; then
               echo "Removing $tag (from $created)"
@@ -105,7 +106,7 @@ jobs:
                   with open(f"{site}/m/{slug}.plist", "wb") as f:
                       plistlib.dump(manifest, f)
                   link = "itms-services://?action=download-manifest&url=" + urllib.parse.quote(f"{base}/m/{slug}.plist", safe=":/")
-                  gone = (datetime.datetime.fromisoformat(created.replace("Z", "+00:00")) + datetime.timedelta(days=30)).strftime("%b %-d")
+                  gone = "the next update" if tag.startswith("install-game-") else (datetime.datetime.fromisoformat(created.replace("Z", "+00:00")) + datetime.timedelta(days=30)).strftime("%b %-d")
                   apps.append((title, ver, link, gone, expires.strftime("%b %-d, %Y") if expires else ""))
           rows = "\n".join(
               f'<li><div><b>{html.escape(t)}</b><span>{html.escape(v)}</span>'

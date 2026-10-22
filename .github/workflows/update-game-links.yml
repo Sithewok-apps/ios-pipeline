@@ -1,0 +1,126 @@
+# Signs the newest builds of the owner's games with the sideloading kit and
+# replaces their Install buttons on the install page (install-links.yml). Game
+# links stay until the next update (the 30-day cleanup skips them). Each game
+# comes from its repo's ios-latest release, or from a test build: the ID of a
+# manual run on an exp/ branch, which keeps its IPAs as run artifacts.
+name: Update game links
+
+on:
+  workflow_dispatch:
+    inputs:
+      openjkdf2_run:
+        description: OpenJKDF2 test build run ID (leave empty for ios-latest)
+        required: false
+        default: ""
+      serioussam_run:
+        description: Serious Sam test build run ID (leave empty for ios-latest)
+        required: false
+        default: ""
+
+permissions:
+  contents: write  # the install releases
+  actions: write   # rebuild the install page
+
+jobs:
+  sign:
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+      CERTS_REPO_URL: ${{ secrets.CERTS_REPO_URL }}
+      CERTS_REPO_USER: ${{ secrets.CERTS_REPO_USER }}
+      CERTS_REPO_TOKEN: ${{ secrets.CERTS_REPO_TOKEN }}
+      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+      GH_TOKEN: ${{ github.token }}
+      WORK: ${{ github.workspace }}/games
+    steps:
+      - name: Download the games
+        env:
+          JK_RUN: ${{ inputs.openjkdf2_run }}
+          SAM_RUN: ${{ inputs.serioussam_run }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$WORK"
+          # slug, repo, run, release asset, artifact name
+          fetch() {
+            local slug=$1 repo=$2 run=$3 asset=$4 artifact=$5
+            mkdir -p "$WORK/dl-$slug"
+            if [ -n "$run" ]; then
+              gh run download "$run" --repo "$repo" --name "$artifact" --dir "$WORK/dl-$slug"
+            else
+              gh release download ios-latest --repo "$repo" --pattern "$asset" --dir "$WORK/dl-$slug"
+            fi
+            mv "$WORK/dl-$slug/$asset" "$WORK/$slug.ipa"
+            echo "$slug: $(du -h "$WORK/$slug.ipa" | cut -f1) from ${run:+test build }${run:-ios-latest}"
+          }
+          fetch openjkdf2 sithewok13-dev/OpenJKDF2-iOS "$JK_RUN" OpenJKDF2-iOS-unsigned.ipa OpenJKDF2-iOS-unsigned-ipa
+          fetch openmots sithewok13-dev/OpenJKDF2-iOS "$JK_RUN" OpenJKDF2-MotS-iOS-unsigned.ipa OpenJKDF2-MotS-iOS-unsigned-ipa
+          fetch sam-fe sithewok13-dev/SeriousSamClassic "$SAM_RUN" serioussam-ios.ipa serioussam-ios
+          fetch sam-se sithewok13-dev/SeriousSamClassic "$SAM_RUN" serioussamse-ios.ipa serioussamse-ios
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Install fastlane
+        run: gem install fastlane --no-document
+
+      - name: Sign them with the sideloading kit
+        run: |
+          mkdir -p "$WORK/fastlane"
+          cat > "$WORK/fastlane/Fastfile" <<'EOF'
+          %w[APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_CONTENT CERTS_REPO_URL
+             CERTS_REPO_USER CERTS_REPO_TOKEN MATCH_PASSWORD].each { |k| ENV[k] = ENV[k].to_s.strip }
+
+          lane :sign do
+            setup_ci
+            key = app_store_connect_api_key(
+              key_id: ENV["ASC_KEY_ID"],
+              issuer_id: ENV["ASC_ISSUER_ID"],
+              key_content: ENV["ASC_KEY_CONTENT"]
+            )
+            match(
+              type: "adhoc",
+              app_identifier: "*",
+              team_id: ENV["APPLE_TEAM_ID"],
+              api_key: key,
+              git_url: ENV["CERTS_REPO_URL"],
+              git_basic_authorization: ["#{ENV['CERTS_REPO_USER']}:#{ENV['CERTS_REPO_TOKEN']}"].pack("m0"),
+              readonly: true
+            )
+            %w[openjkdf2 openmots sam-fe sam-se].each do |slug|
+              resign(
+                ipa: File.join(ENV["WORK"], "#{slug}.ipa"),
+                signing_identity: ENV["sigh_*_adhoc_certificate-name"],
+                provisioning_profile: ENV["sigh_*_adhoc_profile-path"],
+                keychain_path: File.expand_path("~/Library/Keychains/fastlane_tmp_keychain-db")
+              )
+              UI.message("Signed #{slug}")
+            end
+          end
+          EOF
+          cd "$WORK"
+          status=0
+          fastlane sign > sign.log 2>&1 || status=$?
+          grep -E "Signed (openjkdf2|openmots|sam-)" sign.log || true
+          if [ "$status" != 0 ]; then grep -E "\[!\]|rror" sign.log | tail -8; exit "$status"; fi
+
+      - name: Replace the game links
+        run: |
+          set -euo pipefail
+          STAMP=$(date -u +%Y%m%d%H%M)
+          for slug in openjkdf2 openmots sam-fe sam-se; do
+            # the previous links for this game
+            gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName \
+              --jq ".[] | select(.tagName | startswith(\"install-game-$slug-\")) | .tagName" |
+            while read -r old; do
+              gh release delete "$old" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+            done
+            gh release create "install-game-$slug-$STAMP" "$WORK/$slug.ipa" --repo "$GITHUB_REPOSITORY" \
+              --title "$slug (signed $(date -u +%Y-%m-%d))" --notes "Game build signed with the sideloading kit. Install page: https://sithewok-apps.github.io/ios-pipeline/"
+            echo "Updated $slug"
+          done
+          gh workflow run install-links.yml --repo "$GITHUB_REPOSITORY" --ref main
