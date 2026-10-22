@@ -93,6 +93,13 @@ here with the organization's secrets and the app repo needs no secrets or
 changes. Example: [`openjkdf2.yml`](.github/workflows/openjkdf2.yml). Run it from
 this repo's **Actions** tab.
 
+**Jedi Knight goes by itself.** [`auto-openjkdf2.yml`](.github/workflows/auto-openjkdf2.yml)
+("Auto: Jedi Knight builds") checks every hour for a new build of
+sithewok13-dev/OpenJKDF2-iOS. When there is one, it starts **TestFlight -
+OpenJKDF2** and **Update game links** (Jedi Knight and OpenMoTS only). A run
+that failed isn't retried by itself: run it again by hand. To stop it:
+**Actions** > **Auto: Jedi Knight builds** > **...** > **Disable workflow**.
+
 ### Optional inputs
 
 | Input | Default | Use |
@@ -137,7 +144,15 @@ issue here (GitHub emails it). Load the new files into Feather and re-sign.
    iPhone that's registered (Register device, then Make signing kit, then
    re-sign).
 
-Links are removed after 30 days. Anyone with the link can download the file
+**Games** (from **Update game links**) stay until the next update, and each
+has a page of its own with just its **Install** button, to send to a friend:
+
+- Jedi Knight: https://sithewok-apps.github.io/ios-pipeline/jedi-knight/
+- Mysteries of the Sith: https://sithewok-apps.github.io/ios-pipeline/mots/
+- Serious Sam: https://sithewok-apps.github.io/ios-pipeline/serious-sam/ and
+  https://sithewok-apps.github.io/ios-pipeline/serious-sam-se/
+
+Other links are removed after 30 days. Anyone with the link can download the file
 (only registered iPhones can install it), so only share apps you're allowed to.
 One-time setup: **Settings** > **Pages** > Source: **GitHub Actions**.
 
