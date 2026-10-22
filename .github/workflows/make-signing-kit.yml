@@ -3,12 +3,19 @@
 # MATCH_PASSWORD passphrase) and Sideload.mobileprovision (an Ad Hoc profile
 # for any bundle ID, on every registered device, valid for a year). Both go in
 # the private ios-certificates repo, folder "sideload", never in this public
-# repo or its logs. Run again after registering a device or when the profile
-# expires.
+# repo or its logs. Run it by hand after registering a device. It also runs by
+# itself once a month and renews the kit when the profile has less than 45 days
+# left, then opens an issue here (GitHub emails it) saying the new kit is ready.
 name: Make signing kit
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "23 14 3 * *"   # the 3rd of each month
+
+permissions:
+  actions: write   # keep the monthly schedule switched on
+  issues: write    # the "kit renewed" notice
 
 jobs:
   kit:
@@ -24,14 +31,46 @@ jobs:
       CERTS_REPO_TOKEN: ${{ secrets.CERTS_REPO_TOKEN }}
       MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
     steps:
+      # GitHub turns off a public repo's schedules after 60 days without
+      # activity; switching it on again here keeps the monthly check alive.
+      - name: Keep the monthly check on
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable make-signing-kit.yml --repo "$GITHUB_REPOSITORY" || true
+
+      - name: Renew now?
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" != "schedule" ]; then
+            echo "RENEW=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          AUTH=$(printf '%s:%s' "$(echo "$CERTS_REPO_USER" | tr -d ' \r\n')" "$(echo "$CERTS_REPO_TOKEN" | tr -d ' \r\n')" | base64 | tr -d '\n')
+          echo "::add-mask::$AUTH"
+          git -c http.extraheader="Authorization: Basic $AUTH" clone -q --depth 1 "$(echo "$CERTS_REPO_URL" | tr -d ' \r\n')" "$RUNNER_TEMP/check"
+          PROF="$RUNNER_TEMP/check/sideload/Sideload.mobileprovision"
+          if [ ! -f "$PROF" ]; then
+            echo "No kit made yet; nothing to renew."
+            echo "RENEW=0" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          EXP=$(security cms -D -i "$PROF" | plutil -extract ExpirationDate raw -o - -)
+          LEFT=$(( ( $(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$EXP" +%s) - $(date -u +%s) ) / 86400 ))
+          echo "The kit's profile expires $EXP ($LEFT days left)"
+          if [ "$LEFT" -lt 45 ]; then echo "RENEW=1" >> "$GITHUB_ENV"; else echo "RENEW=0" >> "$GITHUB_ENV"; fi
+
       - uses: ruby/setup-ruby@v1
+        if: env.RENEW == '1'
         with:
           ruby-version: "3.3"
 
       - name: Install fastlane
+        if: env.RENEW == '1'
         run: gem install fastlane --no-document
 
       - name: Certificate and wildcard Ad Hoc profile
+        if: env.RENEW == '1'
         run: |
           mkdir -p "$RUNNER_TEMP/kit/fastlane"
           cat > "$RUNNER_TEMP/kit/fastlane/Fastfile" <<'EOF'
@@ -79,6 +118,7 @@ jobs:
           if [ "$status" != 0 ]; then grep -E "\[!\]" kit.log | tail -5; exit "$status"; fi
 
       - name: Save the kit in ios-certificates
+        if: env.RENEW == '1'
         run: |
           set -euo pipefail
           OUT="$RUNNER_TEMP/kitfiles"
@@ -104,3 +144,17 @@ jobs:
             git -c http.extraheader="Authorization: Basic $AUTH" push -q origin HEAD
             echo "Saved the kit in ios-certificates/sideload (expires $EXPIRES)"
           fi
+          echo "KIT_EXPIRES=$EXPIRES" >> "$GITHUB_ENV"
+
+      - name: Tell the owner
+        if: env.RENEW == '1' && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "New signing kit ready (expires ${KIT_EXPIRES%%T*})" --body "The sideloading kit was renewed automatically.
+
+          1. In Safari, open github.com/Sithewok-apps/ios-certificates, folder **sideload**, and download Sideload.p12 and Sideload.mobileprovision.
+          2. Import both into Feather (the .p12 password is your Match passphrase).
+          3. Re-sign your apps in Feather and install them again.
+
+          Close this issue when done."

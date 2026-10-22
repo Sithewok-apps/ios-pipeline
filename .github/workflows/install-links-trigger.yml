@@ -1,0 +1,21 @@
+# Rebuilds the install page (install-links.yml) when an install release is
+# published, edited or deleted. A separate workflow because GitHub Pages
+# deploys from the default branch, and release events run on the tag.
+name: Install links (trigger)
+
+on:
+  release:
+    types: [published, edited, deleted]
+
+permissions:
+  actions: write
+
+jobs:
+  rebuild:
+    if: startsWith(github.event.release.tag_name, 'install-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run install-links.yml --repo "$GITHUB_REPOSITORY" --ref main

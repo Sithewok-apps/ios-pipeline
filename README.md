@@ -122,6 +122,24 @@ service needed:
 3. On the phone, open those two files from GitHub in Safari and import them
    into the signing app. Run step 2 again after adding a device.
 
+The kit renews itself: **Make signing kit** checks on the 3rd of each month
+and makes a new one when the profile has under 45 days left, then opens an
+issue here (GitHub emails it). Load the new files into Feather and re-sign.
+
+### Install links for friends
+
+1. In Feather, sign the app and export the signed `.ipa` to Files.
+2. Here: **Releases** > **Draft a new release**, tag starting with `install-`
+   (for example `install-myapp`), attach the `.ipa`, **Publish**.
+3. A minute later it's on https://sithewok-apps.github.io/ios-pipeline/ with an
+   **Install** button. Send that link; it must be opened in Safari, on an
+   iPhone that's registered (Register device, then Make signing kit, then
+   re-sign).
+
+Links are removed after 30 days. Anyone with the link can download the file
+(only registered iPhones can install it), so only share apps you're allowed to.
+One-time setup: **Settings** > **Pages** > Source: **GitHub Actions**.
+
 Only for apps you have the right to install (your own, open-source, ones you
 obtained legitimately). The kit can sign as you: keep it private.
 

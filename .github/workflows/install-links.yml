@@ -1,0 +1,138 @@
+# Install links for apps signed with the sideloading kit. Upload a signed .ipa
+# (exported from Feather) to a release here whose tag starts with "install-",
+# and this builds a page on GitHub Pages with an Install button for it:
+# https://sithewok-apps.github.io/ios-pipeline/
+# Only iPhones registered on the account can install it, but anyone with the
+# link can download the file, so it's for apps you're allowed to share. Links
+# are removed after 30 days (checked weekly).
+name: Install links
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 7 * * 1"   # Mondays: remove links older than 30 days
+
+permissions:
+  contents: write  # delete old install releases
+  pages: write
+  id-token: write
+  actions: write   # keep the weekly schedule switched on
+
+concurrency:
+  group: install-links
+  cancel-in-progress: false
+
+jobs:
+  page:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Keep the weekly cleanup on
+        if: github.event_name == 'schedule'
+        run: gh workflow enable install-links.yml --repo "$GITHUB_REPOSITORY" || true
+
+      - name: Remove links older than 30 days
+        run: |
+          cutoff=$(date -u -d '30 days ago' +%s)
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName,createdAt \
+            --jq '.[] | select(.tagName | startswith("install-")) | "\(.tagName) \(.createdAt)"' |
+          while read -r tag created; do
+            if [ "$(date -u -d "$created" +%s)" -lt "$cutoff" ]; then
+              echo "Removing $tag (from $created)"
+              gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+            fi
+          done
+
+      - name: Download the signed apps
+        run: |
+          mkdir -p "$RUNNER_TEMP/ipas"
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName,createdAt,isDraft \
+            --jq '.[] | select((.tagName | startswith("install-")) and (.isDraft | not)) | "\(.tagName) \(.createdAt)"' > "$RUNNER_TEMP/list.txt"
+          while read -r tag created; do
+            mkdir -p "$RUNNER_TEMP/ipas/$tag"
+            echo "$created" > "$RUNNER_TEMP/ipas/$tag/.created"
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern '*.ipa' --dir "$RUNNER_TEMP/ipas/$tag" || echo "$tag has no .ipa"
+          done < "$RUNNER_TEMP/list.txt"
+
+      - name: Build the page
+        env:
+          IPAS: ${{ runner.temp }}/ipas
+          SITE: ${{ runner.temp }}/site
+        run: |
+          python3 -I - <<'PY'
+          import os, re, html, plistlib, zipfile, datetime, urllib.parse
+          ipas, site, repo = os.environ["IPAS"], os.environ["SITE"], os.environ["GITHUB_REPOSITORY"]
+          owner, name = repo.split("/")
+          base = f"https://{owner.lower()}.github.io/{name}"
+          os.makedirs(f"{site}/m", exist_ok=True)
+          apps = []
+          for tag in sorted(os.listdir(ipas)):
+              d = os.path.join(ipas, tag)
+              created = open(os.path.join(d, ".created")).read().strip()
+              for fn in sorted(os.listdir(d)):
+                  if not fn.lower().endswith(".ipa"):
+                      continue
+                  try:
+                      z = zipfile.ZipFile(os.path.join(d, fn))
+                      plist = next(n for n in z.namelist() if re.fullmatch(r"Payload/[^/]+\.app/Info\.plist", n))
+                      info = plistlib.loads(z.read(plist))
+                      prof = plist.rsplit("/", 1)[0] + "/embedded.mobileprovision"
+                      devices, expires = 0, ""
+                      if prof in z.namelist():
+                          raw = z.read(prof)
+                          i, j = raw.find(b"<?xml"), raw.find(b"</plist>")
+                          p = plistlib.loads(raw[i:j + 8])
+                          devices = len(p.get("ProvisionedDevices", []))
+                          expires = p.get("ExpirationDate")
+                  except Exception as e:
+                      print(f"::warning::{tag}/{fn} isn't a readable .ipa ({e})")
+                      continue
+                  bid = info.get("CFBundleIdentifier", "")
+                  title = info.get("CFBundleDisplayName") or info.get("CFBundleName") or fn[:-4]
+                  ver = info.get("CFBundleShortVersionString", "")
+                  if not devices:
+                      print(f"::warning::{tag}/{fn} isn't signed with the sideloading kit (no device list); it won't install")
+                  url = f"https://github.com/{repo}/releases/download/{urllib.parse.quote(tag)}/{urllib.parse.quote(fn)}"
+                  slug = re.sub(r"[^A-Za-z0-9._-]", "-", f"{tag}-{fn[:-4]}")
+                  manifest = {"items": [{"assets": [{"kind": "software-package", "url": url}],
+                                         "metadata": {"bundle-identifier": bid, "bundle-version": ver,
+                                                      "kind": "software", "title": title}}]}
+                  with open(f"{site}/m/{slug}.plist", "wb") as f:
+                      plistlib.dump(manifest, f)
+                  link = "itms-services://?action=download-manifest&url=" + urllib.parse.quote(f"{base}/m/{slug}.plist", safe=":/")
+                  gone = (datetime.datetime.fromisoformat(created.replace("Z", "+00:00")) + datetime.timedelta(days=30)).strftime("%b %-d")
+                  apps.append((title, ver, link, gone, expires.strftime("%b %-d, %Y") if expires else ""))
+          rows = "\n".join(
+              f'<li><div><b>{html.escape(t)}</b><span>{html.escape(v)}</span>'
+              f'<small>Link until {g}{" · app works until " + html.escape(e) if e else ""}</small></div>'
+              f'<a class="btn" href="{html.escape(l)}">Install</a></li>' for t, v, l, g, e in apps) or "<li>No apps right now.</li>"
+          page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1"><title>Install apps</title>
+          <style>:root{{color-scheme:light dark;--bg:#fff;--fg:#111;--card:#f2f2f5;--mute:#666;--accent:#0a66ff}}
+          @media (prefers-color-scheme:dark){{:root{{--bg:#000;--fg:#f5f5f7;--card:#1c1c1e;--mute:#98989d;--accent:#2f81ff}}}}
+          body{{margin:0;background:var(--bg);color:var(--fg);font:17px -apple-system,system-ui,sans-serif}}
+          main{{max-width:560px;margin:0 auto;padding:24px 16px}}h1{{font-size:28px;margin:8px 0 4px}}
+          p{{color:var(--mute);line-height:1.4}}ul{{list-style:none;padding:0;margin:20px 0}}
+          li{{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--card);border-radius:14px;padding:14px 16px;margin:10px 0}}
+          li div{{display:flex;flex-direction:column;gap:2px}}span,small{{color:var(--mute)}}small{{font-size:13px}}
+          .btn{{background:var(--accent);color:#fff;text-decoration:none;font-weight:600;border-radius:999px;padding:9px 18px;white-space:nowrap}}</style>
+          </head><body><main><h1>Install apps</h1>
+          <p>Open this page in <b>Safari</b> on your iPhone and tap <b>Install</b>. The app appears on your Home Screen.
+          It only works on iPhones that were registered first, so ask if it says it can't be installed.</p>
+          <ul>{rows}</ul></main></body></html>"""
+          open(f"{site}/index.html", "w").write(page)
+          open(f"{site}/.nojekyll", "w").close()
+          print(f"{len(apps)} app(s) on the page")
+          PY
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
