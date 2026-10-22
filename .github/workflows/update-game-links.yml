@@ -3,7 +3,10 @@
 # links stay until the next update (the 30-day cleanup skips them). Each game
 # comes from its repo's ios-latest release, or from a test build: the ID of a
 # manual run on an exp/ branch, which keeps its IPAs as run artifacts.
+# "Auto: Jedi Knight builds" (auto-openjkdf2.yml) starts it for openjkdf2 and
+# openmots only, when the game repo has a new build.
 name: Update game links
+run-name: Update game links (${{ inputs.games || 'openjkdf2 openmots sam-fe sam-se' }})
 
 on:
   workflow_dispatch:
@@ -16,6 +19,10 @@ on:
         description: Serious Sam test build run ID (leave empty for ios-latest)
         required: false
         default: ""
+      games:
+        description: Which games to sign, separated by spaces
+        required: false
+        default: openjkdf2 openmots sam-fe sam-se
 
 permissions:
   contents: write  # the install releases
@@ -36,6 +43,7 @@ jobs:
       MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
       GH_TOKEN: ${{ github.token }}
       WORK: ${{ github.workspace }}/games
+      GAMES: ${{ inputs.games || 'openjkdf2 openmots sam-fe sam-se' }}
     steps:
       - name: Download the games
         env:
@@ -43,10 +51,14 @@ jobs:
           SAM_RUN: ${{ inputs.serioussam_run }}
         run: |
           set -euo pipefail
+          for g in $GAMES; do
+            case "$g" in openjkdf2|openmots|sam-fe|sam-se) ;; *) echo "::error::Unknown game: $g"; exit 1;; esac
+          done
           mkdir -p "$WORK"
           # slug, repo, run, release asset, artifact name
           fetch() {
             local slug=$1 repo=$2 run=$3 asset=$4 artifact=$5
+            case " $GAMES " in *" $slug "*) ;; *) echo "$slug: not asked for"; return 0;; esac
             mkdir -p "$WORK/dl-$slug"
             if [ -n "$run" ]; then
               gh run download "$run" --repo "$repo" --name "$artifact" --dir "$WORK/dl-$slug"
@@ -91,7 +103,7 @@ jobs:
               git_basic_authorization: ["#{ENV['CERTS_REPO_USER']}:#{ENV['CERTS_REPO_TOKEN']}"].pack("m0"),
               readonly: true
             )
-            %w[openjkdf2 openmots sam-fe sam-se].each do |slug|
+            ENV["GAMES"].split.each do |slug|
               resign(
                 ipa: File.join(ENV["WORK"], "#{slug}.ipa"),
                 signing_identity: ENV["sigh_*_adhoc_certificate-name"],
@@ -112,7 +124,7 @@ jobs:
         run: |
           set -euo pipefail
           STAMP=$(date -u +%Y%m%d%H%M)
-          for slug in openjkdf2 openmots sam-fe sam-se; do
+          for slug in $GAMES; do
             # the previous links for this game
             gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName \
               --jq ".[] | select(.tagName | startswith(\"install-game-$slug-\")) | .tagName" |

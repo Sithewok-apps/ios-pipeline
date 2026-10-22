@@ -2,8 +2,10 @@
 # repo is in Sithewok-apps, so it has the organization's secrets. It takes the
 # IPAs from a public release of sithewok13-dev/OpenJKDF2-iOS (no rebuild, no
 # change to that repo) and ships them as com.sithewok.openjkdf2 and
-# com.sithewok.openmots.
+# com.sithewok.openmots. "Auto: Jedi Knight builds" (auto-openjkdf2.yml) starts
+# it with ios-latest when the game repo has a new build.
 name: TestFlight - OpenJKDF2
+run-name: TestFlight - OpenJKDF2 (${{ inputs.from_run && format('test build {0}', inputs.from_run) || inputs.release_tag }})
 
 on:
   workflow_dispatch:

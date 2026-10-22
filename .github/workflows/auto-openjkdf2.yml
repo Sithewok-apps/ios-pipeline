@@ -1,0 +1,69 @@
+# Sends each new Jedi Knight and OpenMoTS test build on by itself. Every hour
+# it looks at the game repo's ios-latest release (sithewok13-dev/OpenJKDF2-iOS).
+# When its two .ipa files are newer than the last run of a workflow below that
+# sent ios-latest, it starts that workflow:
+#   - "TestFlight - OpenJKDF2" (openjkdf2.yml), with ios-latest
+#   - "Update game links" (update-game-links.yml), for openjkdf2 and openmots
+# A run that failed counts as sent, so a broken build isn't retried every hour
+# (GitHub emails the failure; run it again by hand). Nothing is stored and no
+# key is needed: the game repo is public, and both workflows run here with the
+# organization's secrets as when started by hand.
+# To stop it: Actions > "Auto: Jedi Knight builds" > ... > Disable workflow, or
+# delete this file.
+name: "Auto: Jedi Knight builds"
+
+on:
+  schedule:
+    - cron: "23 * * * *"   # every hour
+  workflow_dispatch:
+
+permissions:
+  actions: write   # start the two workflows, keep the schedule switched on
+
+concurrency:
+  group: auto-openjkdf2
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GAME_REPO: sithewok13-dev/OpenJKDF2-iOS
+    steps:
+      - name: Keep the hourly check on
+        if: github.event_name == 'schedule'
+        run: gh workflow enable auto-openjkdf2.yml --repo "$GITHUB_REPOSITORY" || true
+
+      - name: Start the workflows for a new build
+        run: |
+          set -euo pipefail
+          # when the newest build's two files went up (both, fully uploaded)
+          built=$(gh api "repos/$GAME_REPO/releases/tags/ios-latest" --jq '
+            [.assets[] | select(.state == "uploaded" and
+              (.name == "OpenJKDF2-iOS-unsigned.ipa" or .name == "OpenJKDF2-MotS-iOS-unsigned.ipa"))]
+            | if length == 2 then (map(.updated_at) | max) else "" end')
+          if [ -z "$built" ]; then
+            echo "ios-latest doesn't have both apps right now; trying again next hour"
+            exit 0
+          fi
+          echo "Newest build: $built"
+          # the newest start of a workflow that sent ios-latest (its run name says what it sent)
+          last() {
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$1/runs?per_page=50" --jq "
+              [.workflow_runs[] | select(.conclusion != \"cancelled\" and (.display_title | contains(\"$2\")))
+               | .created_at] | max // \"\""
+          }
+          tf=$(last openjkdf2.yml "(ios-latest)")
+          gl=$(last update-game-links.yml "openjkdf2")
+          echo "TestFlight last sent: ${tf:-never}; install page last updated: ${gl:-never}"
+          # ISO 8601 UTC times compare as text
+          if [[ -z "$tf" || "$tf" < "$built" ]]; then
+            gh workflow run openjkdf2.yml --repo "$GITHUB_REPOSITORY" --ref main -f release_tag=ios-latest
+            echo "Started TestFlight - OpenJKDF2"
+          fi
+          if [[ -z "$gl" || "$gl" < "$built" ]]; then
+            gh workflow run update-game-links.yml --repo "$GITHUB_REPOSITORY" --ref main -f games="openjkdf2 openmots"
+            echo "Started Update game links"
+          fi
