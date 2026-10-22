@@ -127,7 +127,15 @@ jobs:
           done
           OUT="$RUNNER_TEMP/kitfiles"
           mkdir -p "$OUT"
-          security export -k "$KEYCHAIN_PATH" -t identities -f pkcs12 -P "$MATCH_PASSWORD" -o "$OUT/Sideload.p12"
+          security export -k "$KEYCHAIN_PATH" -t identities -f pkcs12 -P "$MATCH_PASSWORD" -o "$OUT/raw.p12"
+          # Re-packed in the classic format (3DES, SHA-1 MAC) that every signing
+          # app reads; Feather reports the newer format as a bad password
+          export MATCH_PASSWORD
+          /usr/bin/openssl pkcs12 -in "$OUT/raw.p12" -passin env:MATCH_PASSWORD -nodes -out "$OUT/key.pem"
+          /usr/bin/openssl pkcs12 -export -in "$OUT/key.pem" -out "$OUT/Sideload.p12" -passout env:MATCH_PASSWORD \
+            -name "Sideload" -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1
+          rm -P "$OUT/key.pem" "$OUT/raw.p12" 2>/dev/null || rm -f "$OUT/key.pem" "$OUT/raw.p12"
+          /usr/bin/openssl pkcs12 -in "$OUT/Sideload.p12" -passin env:MATCH_PASSWORD -noout && echo "Checked: the .p12 opens with the Match passphrase"
           cp "$PROFILE_PATH" "$OUT/Sideload.mobileprovision"
           EXPIRES=$(security cms -D -i "$OUT/Sideload.mobileprovision" | plutil -extract ExpirationDate raw -o - -)
 
