@@ -2,7 +2,9 @@
 # replaces their Install buttons on the install page (install-links.yml). Game
 # links stay until the next update (the 30-day cleanup skips them). Each game
 # comes from its repo's ios-latest release, or from a test build: the ID of a
-# manual run on an exp/ branch, which keeps its IPAs as run artifacts.
+# manual run on an exp/ branch, which keeps its IPAs as run artifacts. Games
+# without releases (DOOM 3, Dark Forces) come from their newest successful
+# build on the ios branch, or the run ID given.
 # "Auto: Jedi Knight builds" (auto-openjkdf2.yml) starts it for openjkdf2 and
 # openmots only, when the game repo has a new build.
 name: Update game links
@@ -19,8 +21,12 @@ on:
         description: Serious Sam test build run ID (leave empty for ios-latest)
         required: false
         default: ""
+      other_run:
+        description: Half-Life, DOOM 3 or Dark Forces build run ID, when signing just that one (leave empty for the newest)
+        required: false
+        default: ""
       games:
-        description: Which games to sign, separated by spaces
+        description: Which games to sign, separated by spaces (also half-life, doom3, darkforces)
         required: false
         default: openjkdf2 openmots sam-fe sam-se
 
@@ -54,17 +60,27 @@ jobs:
         env:
           JK_RUN: ${{ inputs.openjkdf2_run }}
           SAM_RUN: ${{ inputs.serioussam_run }}
+          OTHER_RUN: ${{ inputs.other_run }}
         run: |
           set -euo pipefail
           for g in $GAMES; do
-            case "$g" in openjkdf2|openmots|sam-fe|sam-se) ;; *) echo "::error::Unknown game: $g"; exit 1;; esac
+            case "$g" in openjkdf2|openmots|sam-fe|sam-se|half-life|doom3|darkforces) ;; *) echo "::error::Unknown game: $g"; exit 1;; esac
           done
           mkdir -p "$WORK"
-          # slug, repo, run, release asset, artifact name
+          # slug, repo, run, release asset, artifact name[, workflow: no release,
+          # the newest successful run of it on the ios branch]
           fetch() {
-            local slug=$1 repo=$2 run=$3 asset=$4 artifact=$5
+            local slug=$1 repo=$2 run=$3 asset=$4 artifact=$5 workflow=${6:-}
             case " $GAMES " in *" $slug "*) ;; *) echo "$slug: not asked for"; return 0;; esac
             mkdir -p "$WORK/dl-$slug"
+            if [ -z "$run" ] && [ -n "$workflow" ]; then
+              run=$(gh run list --repo "$repo" --workflow "$workflow" --branch ios --status success \
+                --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+              if [ -z "$run" ]; then
+                echo "::error::$slug: no successful $workflow build on the ios branch of $repo"
+                exit 1
+              fi
+            fi
             if [ -n "$run" ]; then
               gh run download "$run" --repo "$repo" --name "$artifact" --dir "$WORK/dl-$slug"
             else
@@ -77,6 +93,9 @@ jobs:
           fetch openmots sithewok13-dev/OpenJKDF2-iOS "$JK_RUN" OpenJKDF2-MotS-iOS-unsigned.ipa OpenJKDF2-MotS-iOS-unsigned-ipa
           fetch sam-fe sithewok13-dev/SeriousSamClassic "$SAM_RUN" serioussam-ios.ipa serioussam-ios
           fetch sam-se sithewok13-dev/SeriousSamClassic "$SAM_RUN" serioussamse-ios.ipa serioussamse-ios
+          fetch half-life sithewok13-dev/xash3d-fwgs "$OTHER_RUN" Xash3D-iOS-unsigned.ipa Xash3D-iOS-unsigned-ipa
+          fetch doom3 sithewok13-dev/doom3-ios "$OTHER_RUN" DOOM3-iOS-unsigned.ipa DOOM3-iOS-unsigned.ipa ios.yml
+          fetch darkforces sithewok13-dev/TheForceEngine "$OTHER_RUN" DarkForces-iOS-unsigned.ipa DarkForces-iOS-unsigned.ipa ios.yml
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -121,7 +140,7 @@ jobs:
           cd "$WORK"
           status=0
           fastlane sign > sign.log 2>&1 || status=$?
-          grep -E "Signed (openjkdf2|openmots|sam-)" sign.log || true
+          grep -E "Signed (openjkdf2|openmots|sam-|half-life|doom3|darkforces)" sign.log || true
           if [ "$status" != 0 ]; then grep -E "\[!\]|rror" sign.log | tail -8; exit "$status"; fi
 
       - name: Replace the game links
