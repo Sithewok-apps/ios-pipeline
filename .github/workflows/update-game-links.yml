@@ -4,7 +4,10 @@
 # comes from its repo's ios-latest release, or from a test build: the ID of a
 # manual run on an exp/ branch, which keeps its IPAs as run artifacts. Games
 # without releases (DOOM 3, Dark Forces) come from their newest successful
-# build on the ios branch, or the run ID given.
+# build on the ios branch, or the run ID given. Shadows of the Empire comes
+# from the newest successful build on main of the private sote-ios repo,
+# which needs the SOTE_REPO_TOKEN secret (a fine-grained token with Actions:
+# Read on sithewok13-dev/sote-ios).
 # "Auto: Jedi Knight builds" (auto-openjkdf2.yml) starts it for openjkdf2 and
 # openmots only, when the game repo has a new build.
 name: Update game links
@@ -22,11 +25,11 @@ on:
         required: false
         default: ""
       other_run:
-        description: Half-Life, DOOM 3 or Dark Forces build run ID, when signing just that one (leave empty for the newest)
+        description: Half-Life, DOOM 3, Dark Forces or SotE build run ID, when signing just that one (leave empty for the newest)
         required: false
         default: ""
       games:
-        description: Which games to sign, separated by spaces (also half-life, doom3, darkforces)
+        description: Which games to sign, separated by spaces (also half-life, doom3, darkforces, sote)
         required: false
         default: openjkdf2 openmots sam-fe sam-se
 
@@ -61,10 +64,11 @@ jobs:
           JK_RUN: ${{ inputs.openjkdf2_run }}
           SAM_RUN: ${{ inputs.serioussam_run }}
           OTHER_RUN: ${{ inputs.other_run }}
+          SOTE_REPO_TOKEN: ${{ secrets.SOTE_REPO_TOKEN }}
         run: |
           set -euo pipefail
           for g in $GAMES; do
-            case "$g" in openjkdf2|openmots|sam-fe|sam-se|half-life|doom3|darkforces) ;; *) echo "::error::Unknown game: $g"; exit 1;; esac
+            case "$g" in openjkdf2|openmots|sam-fe|sam-se|half-life|doom3|darkforces|sote) ;; *) echo "::error::Unknown game: $g"; exit 1;; esac
           done
           mkdir -p "$WORK"
           # slug, repo, run, release asset, artifact name[, workflow: no release,
@@ -96,6 +100,37 @@ jobs:
           fetch half-life sithewok13-dev/xash3d-fwgs "$OTHER_RUN" Xash3D-iOS-unsigned.ipa Xash3D-iOS-unsigned-ipa
           fetch doom3 sithewok13-dev/doom3-ios "$OTHER_RUN" DOOM3-iOS-unsigned.ipa DOOM3-iOS-unsigned.ipa ios.yml
           fetch darkforces sithewok13-dev/TheForceEngine "$OTHER_RUN" DarkForces-iOS-unsigned.ipa DarkForces-iOS-unsigned.ipa ios.yml
+          # Shadows of the Empire: a private repo, and an artifact named after
+          # the version (SotE-iOS-<version>.ipa) from the newest successful
+          # build on main.
+          case " $GAMES " in
+            *" sote "*)
+              if [ -z "$SOTE_REPO_TOKEN" ]; then
+                echo "::error::sote: add the SOTE_REPO_TOKEN secret (fine-grained token, Actions: Read on sithewok13-dev/sote-ios)"
+                exit 1
+              fi
+              run=$OTHER_RUN
+              if [ -z "$run" ]; then
+                run=$(GH_TOKEN=$SOTE_REPO_TOKEN gh run list --repo sithewok13-dev/sote-ios --workflow ios.yml \
+                  --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+              fi
+              if [ -z "$run" ]; then
+                echo "::error::sote: no successful ios.yml build on main of sithewok13-dev/sote-ios"
+                exit 1
+              fi
+              mkdir -p "$WORK/dl-sote"
+              GH_TOKEN=$SOTE_REPO_TOKEN gh run download "$run" --repo sithewok13-dev/sote-ios \
+                --pattern 'SotE-iOS-*.ipa' --dir "$WORK/dl-sote"
+              ipa=$(find "$WORK/dl-sote" -name 'SotE-iOS-*.ipa' -type f | head -1)
+              if [ -z "$ipa" ]; then
+                echo "::error::sote: build $run has no SotE-iOS-*.ipa artifact"
+                exit 1
+              fi
+              mv "$ipa" "$WORK/sote.ipa"
+              echo "sote: $(du -h "$WORK/sote.ipa" | cut -f1) from build $run ($(basename "$ipa"))"
+              ;;
+            *) echo "sote: not asked for" ;;
+          esac
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -140,7 +175,7 @@ jobs:
           cd "$WORK"
           status=0
           fastlane sign > sign.log 2>&1 || status=$?
-          grep -E "Signed (openjkdf2|openmots|sam-|half-life|doom3|darkforces)" sign.log || true
+          grep -E "Signed (openjkdf2|openmots|sam-|half-life|doom3|darkforces|sote)" sign.log || true
           if [ "$status" != 0 ]; then grep -E "\[!\]|rror" sign.log | tail -8; exit "$status"; fi
 
       - name: Replace the game links
