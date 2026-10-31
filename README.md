@@ -153,13 +153,18 @@ has a page of its own with just its **Install** button, to send to a friend:
   https://sithewok-apps.github.io/ios-pipeline/serious-sam-se/
 - Half-Life: https://sithewok-apps.github.io/ios-pipeline/half-life/
 - Dark Forces: https://sithewok-apps.github.io/ios-pipeline/dark-forces/
+- Shadows of the Empire: https://sithewok-apps.github.io/ios-pipeline/shadows-of-the-empire/
+  (`sote`). Its repo is private, so it needs the `SOTE_REPO_TOKEN` secret
+  here: a fine-grained token with **Actions: Read** on
+  sithewok13-dev/sote-ios. Players still copy in their own ROM.
 - DOOM 3 (`doom3`, /doom3/) is wired up but not signed yet: its app still
   carries the co-op mod's copies of the game's text files.
 
 Run **Update game links** with `games` set to the ones to refresh, for example
 `half-life darkforces`. Half-Life comes from its `ios-latest` release; DOOM 3
-and Dark Forces from their newest successful build on the `ios` branch (or the
-run ID in `other_run`).
+and Dark Forces from their newest successful build on the `ios` branch, and
+SotE from its newest successful build on `main` (or the run ID in
+`other_run`).
 
 Other links are removed after 30 days. Anyone with the link can download the file
 (only registered iPhones can install it), so only share apps you're allowed to.
