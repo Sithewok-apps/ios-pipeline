@@ -105,6 +105,8 @@ jobs:
           # build on main.
           case " $GAMES " in
             *" sote "*)
+              # Pasted on a phone, a token can pick up spaces or a line break.
+              SOTE_REPO_TOKEN=$(printf %s "$SOTE_REPO_TOKEN" | tr -d '[:space:]')
               if [ -z "$SOTE_REPO_TOKEN" ]; then
                 echo "::error::sote: add the SOTE_REPO_TOKEN secret (fine-grained token, Actions: Read on sithewok13-dev/sote-ios)"
                 exit 1
