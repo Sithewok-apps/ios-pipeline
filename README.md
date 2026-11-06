@@ -161,7 +161,10 @@ has a page of its own with just its **Install** button, to send to a friend:
   (`otse`), from the oregon-latest release of sithewok13-dev/near-grog;
   [`auto-otse.yml`](.github/workflows/auto-otse.yml) ("Auto: OTSE builds")
   signs each new build by itself within the hour. Players copy in their own
-  game files (Files > On My iPhone > OTSE).
+  game files (Files > On My iPhone > OTSE). Its home-screen icon (the game's
+  wagon) comes from the private jk-files repo when the `JKFILES_ICON_TOKEN`
+  secret is set: a fine-grained token with **Contents: Read** on
+  sithewok13-dev/jk-files.
 - DOOM 3: https://sithewok-apps.github.io/ios-pipeline/doom3/ (from the
   build that cut the co-op mod's text down to its own lines, so the app
   carries none of the game's files).

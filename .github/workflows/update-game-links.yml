@@ -148,6 +148,52 @@ jobs:
             *) echo "otse: not asked for" ;;
           esac
 
+      # OTSE's home-screen icon: the game's own wagon, kept in the owner's
+      # private jk-files repo (projects/near-grog/otse-icon.png), so it's only
+      # in the app signed here, never in a public repo. Needs the
+      # JKFILES_ICON_TOKEN secret: a fine-grained token with Contents: Read on
+      # sithewok13-dev/jk-files. Without it OTSE keeps the icon it's built
+      # with. The app's whole picture catalog (near-grog's, its buttons too)
+      # is compiled again with this icon in it.
+      - name: OTSE's own icon
+        if: contains(format(' {0} ', env.GAMES), ' otse ')
+        env:
+          JKFILES_ICON_TOKEN: ${{ secrets.JKFILES_ICON_TOKEN }}
+        run: |
+          set -euo pipefail
+          JKFILES_ICON_TOKEN=$(printf %s "$JKFILES_ICON_TOKEN" | tr -d '[:space:]')
+          if [ -z "$JKFILES_ICON_TOKEN" ]; then
+            echo "::warning::otse: no JKFILES_ICON_TOKEN secret, so it keeps its own icon"
+            exit 0
+          fi
+          T="$WORK/otse-icon"
+          rm -rf "$T" && mkdir -p "$T"
+          GH_TOKEN=$JKFILES_ICON_TOKEN gh api -H "Accept: application/vnd.github.raw" \
+            repos/sithewok13-dev/jk-files/contents/projects/near-grog/otse-icon.png > "$T/icon.png"
+          # near-grog's picture catalog, as the app was built with it
+          git clone -q --depth 1 --filter=blob:none --sparse https://github.com/sithewok13-dev/near-grog "$T/ng"
+          git -C "$T/ng" sparse-checkout set dists/ios7/Images.xcassets
+          CAT="$T/ng/dists/ios7/Images.xcassets"
+          for f in "$CAT"/AppIcon.appiconset/*.png; do
+            w=$(sips -g pixelWidth "$f" | awk '/pixelWidth/ {print $2}')
+            sips -z "$w" "$w" "$T/icon.png" --out "$f" >/dev/null
+          done
+          # into the app, and the app back into the .ipa
+          mkdir "$T/x" && (cd "$T/x" && unzip -q "$WORK/otse.ipa")
+          APP=$(find "$T/x/Payload" -maxdepth 1 -name '*.app' -type d | head -1)
+          PL="$APP/Info.plist"
+          MINOS=$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$PL")
+          xcrun actool "$CAT" --compile "$APP" --platform iphoneos \
+            --minimum-deployment-target "$MINOS" --app-icon AppIcon \
+            --target-device iphone --target-device ipad \
+            --output-partial-info-plist "$T/partial.plist" --output-format human-readable-text | tail -3
+          plutil -remove CFBundleIcons "$PL" 2>/dev/null || true
+          plutil -remove 'CFBundleIcons~ipad' "$PL" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Merge $T/partial.plist" "$PL"
+          rm "$WORK/otse.ipa"
+          (cd "$T/x" && zip -qry "$WORK/otse.ipa" Payload)
+          echo "otse: its own icon in"
+
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.3"
