@@ -157,12 +157,14 @@ has a page of its own with just its **Install** button, to send to a friend:
   (`sote`). Its repo is private, so it needs the `SOTE_REPO_TOKEN` secret
   here: a fine-grained token with **Actions: Read** on
   sithewok13-dev/sote-ios. Players still copy in their own ROM.
+- POSTAL: https://sithewok-apps.github.io/ios-pipeline/postal/ (`postal`)
+- No One Lives Forever 2: https://sithewok-apps.github.io/ios-pipeline/nolf2/ (`nolf2`)
 - DOOM 3: https://sithewok-apps.github.io/ios-pipeline/doom3/ (from the
   build that cut the co-op mod's text down to its own lines, so the app
   carries none of the game's files).
 
 Run **Update game links** with `games` set to the ones to refresh, for example
-`half-life darkforces`. Half-Life comes from its `ios-latest` release; DOOM 3
+`half-life darkforces`. Half-Life, POSTAL and NOLF2 come from their `ios-latest` release; DOOM 3
 and Dark Forces from their newest successful build on the `ios` branch, and
 SotE from its newest successful build on `main` (or the run ID in
 `other_run`).
