@@ -1,0 +1,56 @@
+# Sends each new Oregon Trail Susy Edition build on by itself. Every hour it
+# looks at the oregon-latest release of sithewok13-dev/near-grog. When its .ipa
+# is newer than the last "Update game links" run that signed otse, it starts
+# that workflow for otse, so https://sithewok-apps.github.io/ios-pipeline/otse/
+# always installs the newest build. A run that failed counts as sent, so a
+# broken build isn't retried every hour (GitHub emails the failure; run it
+# again by hand). Nothing is stored and no key is needed: near-grog is public.
+# To stop it: Actions > "Auto: OTSE builds" > ... > Disable workflow, or delete
+# this file.
+name: "Auto: OTSE builds"
+
+on:
+  schedule:
+    - cron: "37 * * * *"   # every hour
+  workflow_dispatch:
+
+permissions:
+  actions: write   # start Update game links, keep the schedule switched on
+
+concurrency:
+  group: auto-otse
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GAME_REPO: sithewok13-dev/near-grog
+    steps:
+      - name: Keep the hourly check on
+        if: github.event_name == 'schedule'
+        run: gh workflow enable auto-otse.yml --repo "$GITHUB_REPOSITORY" || true
+
+      - name: Sign a new build
+        run: |
+          set -euo pipefail
+          built=$(gh api "repos/$GAME_REPO/releases/tags/oregon-latest" --jq '
+            [.assets[] | select(.state == "uploaded" and .name == "Oregon-Trail-Susy-Edition-ios.ipa")
+             | .updated_at] | max // ""' 2>/dev/null || true)
+          if [ -z "$built" ]; then
+            echo "oregon-latest has no app right now; trying again next hour"
+            exit 0
+          fi
+          echo "Newest build: $built"
+          # the newest start of Update game links that signed otse (its run name says)
+          gl=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/update-game-links.yml/runs?per_page=50" --jq '
+            [.workflow_runs[] | select(.conclusion != "cancelled" and (.display_title | contains("otse")))
+             | .created_at] | max // ""')
+          echo "Install page last updated: ${gl:-never}"
+          # ISO 8601 UTC times compare as text
+          if [[ -z "$gl" || "$gl" < "$built" ]]; then
+            gh workflow run update-game-links.yml --repo "$GITHUB_REPOSITORY" --ref main -f games=otse
+            echo "Started Update game links for otse"
+          fi

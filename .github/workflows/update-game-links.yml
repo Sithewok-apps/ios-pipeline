@@ -7,7 +7,9 @@
 # build on the ios branch, or the run ID given. Shadows of the Empire comes
 # from the newest successful build on main of the private sote-ios repo,
 # which needs the SOTE_REPO_TOKEN secret (a fine-grained token with Actions:
-# Read on sithewok13-dev/sote-ios).
+# Read on sithewok13-dev/sote-ios). Oregon Trail Susy Edition (otse) comes from
+# the oregon-latest release of sithewok13-dev/near-grog ("Auto: OTSE builds",
+# auto-otse.yml, starts it for each new build).
 # "Auto: Jedi Knight builds" (auto-openjkdf2.yml) starts it for openjkdf2 and
 # openmots only, when the game repo has a new build.
 name: Update game links
@@ -29,7 +31,7 @@ on:
         required: false
         default: ""
       games:
-        description: Which games to sign, separated by spaces (also half-life, doom3, darkforces, sote)
+        description: Which games to sign, separated by spaces (also half-life, doom3, darkforces, sote, otse)
         required: false
         default: openjkdf2 openmots sam-fe sam-se
 
@@ -68,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           for g in $GAMES; do
-            case "$g" in openjkdf2|openmots|sam-fe|sam-se|half-life|doom3|darkforces|sote) ;; *) echo "::error::Unknown game: $g"; exit 1;; esac
+            case "$g" in openjkdf2|openmots|sam-fe|sam-se|half-life|doom3|darkforces|sote|otse) ;; *) echo "::error::Unknown game: $g"; exit 1;; esac
           done
           mkdir -p "$WORK"
           # slug, repo, run, release asset, artifact name[, workflow: no release,
@@ -133,6 +135,18 @@ jobs:
               ;;
             *) echo "sote: not asked for" ;;
           esac
+          # Oregon Trail Susy Edition: the near-grog repo's oregon-latest
+          # release (the game's files aren't in it: players copy in their own)
+          case " $GAMES " in
+            *" otse "*)
+              mkdir -p "$WORK/dl-otse"
+              gh release download oregon-latest --repo sithewok13-dev/near-grog \
+                --pattern Oregon-Trail-Susy-Edition-ios.ipa --dir "$WORK/dl-otse"
+              mv "$WORK/dl-otse/Oregon-Trail-Susy-Edition-ios.ipa" "$WORK/otse.ipa"
+              echo "otse: $(du -h "$WORK/otse.ipa" | cut -f1) from oregon-latest"
+              ;;
+            *) echo "otse: not asked for" ;;
+          esac
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -177,7 +191,7 @@ jobs:
           cd "$WORK"
           status=0
           fastlane sign > sign.log 2>&1 || status=$?
-          grep -E "Signed (openjkdf2|openmots|sam-|half-life|doom3|darkforces|sote)" sign.log || true
+          grep -E "Signed (openjkdf2|openmots|sam-|half-life|doom3|darkforces|sote|otse)" sign.log || true
           if [ "$status" != 0 ]; then grep -E "\[!\]|rror" sign.log | tail -8; exit "$status"; fi
 
       - name: Replace the game links
