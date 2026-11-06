@@ -4,7 +4,9 @@
 # for any bundle ID, on every registered device, valid for a year). Both go on
 # the "sideload" branch of the private ios-certificates repo (match decrypts
 # every file on its own branch, so the kit must stay off it), never in this
-# public repo or its logs. Run it by hand after registering a device. It also runs by
+# public repo or its logs. Register device starts it for a new device. After a
+# new kit it starts Update game links for every game, so the install page works
+# on every registered device. It also runs by
 # itself once a month and renews the kit when the profile has less than 45 days
 # left, then opens an issue here (GitHub emails it) saying the new kit is ready.
 name: Make signing kit
@@ -15,7 +17,7 @@ on:
     - cron: "23 14 3 * *"   # the 3rd of each month
 
 permissions:
-  actions: write   # keep the monthly schedule switched on
+  actions: write   # keep the monthly schedule switched on; start Update game links
   issues: write    # the "kit renewed" notice
 
 jobs:
@@ -186,6 +188,15 @@ jobs:
             echo "Saved the kit on the sideload branch of ios-certificates (expires $EXPIRES)"
           fi
           echo "KIT_EXPIRES=$EXPIRES" >> "$GITHUB_ENV"
+
+      - name: Re-sign the games for every registered device
+        if: env.RENEW == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run update-game-links.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" \
+            -f games="openjkdf2 openmots sam-fe sam-se half-life doom3 darkforces sote postal nolf2"
+          echo "Started Update game links for every game"
 
       - name: Tell the owner
         if: env.RENEW == '1' && github.event_name == 'schedule'

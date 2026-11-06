@@ -122,13 +122,16 @@ Sign any app for your own registered devices with your own account, no
 service needed:
 
 1. **Register device** (Actions): a name and the device's UDID (udid.tech
-   shows it). Up to 100 iPhones a year.
+   shows it). Up to 100 iPhones a year. A new device starts step 2 by itself,
+   and step 2 then re-signs every game on the install page for all your
+   registered devices (about 15 minutes in all).
 2. **Make signing kit** (Actions): saves `Sideload.p12` (password: your Match
    passphrase) and `Sideload.mobileprovision` (any app, every registered
    device, one year) on the `sideload` branch of the private `ios-certificates`
    repo (github.com/Sithewok-apps/ios-certificates/tree/sideload).
 3. On the phone, open those two files from GitHub in Safari and import them
-   into the signing app. Run step 2 again after adding a device.
+   into the signing app. After adding a device, load the new kit
+   into the signing app.
 
 The kit renews itself: **Make signing kit** checks on the 3rd of each month
 and makes a new one when the profile has under 45 days left, then opens an

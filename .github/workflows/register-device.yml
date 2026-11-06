@@ -1,7 +1,8 @@
 # Registers an iPhone or iPad on the Apple developer account, so the signing
-# kit (make-signing-kit.yml) can install apps on it. Run "Make signing kit"
-# again afterwards so its profile includes the new device. The UDID is masked
-# in the log (this repo's logs are public).
+# kit (make-signing-kit.yml) can install apps on it. A new device starts
+# "Make signing kit" by itself, which then re-signs every game on the install
+# page, so the links work on every registered device. The UDID is masked in
+# the log (this repo's logs are public).
 name: Register device
 
 on:
@@ -13,6 +14,9 @@ on:
       udid:
         description: The device's UDID (from udid.tech or Finder)
         required: true
+
+permissions:
+  actions: write   # start Make signing kit
 
 jobs:
   register:
@@ -60,7 +64,7 @@ jobs:
               puts "STATUS Registered \"#{name}\""
             end
             all = Spaceship::ConnectAPI::Device.all.select { |x| x.enabled? }
-            puts "STATUS #{all.size} devices on the account. Now run Make signing kit to include it."
+            puts "STATUS #{all.size} devices on the account."
           end
           EOF
           cd "$RUNNER_TEMP/dev"
@@ -68,3 +72,12 @@ jobs:
           fastlane register > dev.log 2>&1 || status=$?
           grep STATUS dev.log || true
           if [ "$status" != 0 ]; then grep -E "\[!\]" dev.log | tail -3; exit "$status"; fi
+          if grep -q 'STATUS Registered' dev.log; then echo "NEW_DEVICE=1" >> "$GITHUB_ENV"; fi
+
+      - name: Make a new signing kit and re-sign the games
+        if: env.NEW_DEVICE == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run make-signing-kit.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"
+          echo "Started Make signing kit; it re-signs the games when it's done (about 15 minutes in all)."
