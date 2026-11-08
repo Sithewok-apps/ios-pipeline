@@ -8,7 +8,10 @@
 # from the newest successful build on main of the private sote-ios repo,
 # which needs the SOTE_REPO_TOKEN secret (a fine-grained token with Actions:
 # Read on sithewok13-dev/sote-ios). POSTAL, NOLF2 and Raze come from
-# their repos' ios-latest release.
+# their repos' ios-latest release. No One Lives Forever (nolf) comes from the
+# ios-latest release of the private relith-dev/relith repo, which needs the
+# RELITH_REPO_TOKEN secret (a fine-grained token with Contents: Read on
+# relith-dev/relith); without it nolf is skipped with a warning.
 # "Auto: Jedi Knight builds" (auto-openjkdf2.yml) starts it for openjkdf2 and
 # openmots only, when the game repo has a new build.
 name: Update game links
@@ -30,7 +33,7 @@ on:
         required: false
         default: ""
       games:
-        description: Which games to sign, separated by spaces (also half-life, doom3, darkforces, sote, postal, nolf2, raze)
+        description: Which games to sign, separated by spaces (also half-life, doom3, darkforces, sote, postal, nolf2, raze, nolf)
         required: false
         default: openjkdf2 openmots sam-fe sam-se
 
@@ -66,10 +69,11 @@ jobs:
           SAM_RUN: ${{ inputs.serioussam_run }}
           OTHER_RUN: ${{ inputs.other_run }}
           SOTE_REPO_TOKEN: ${{ secrets.SOTE_REPO_TOKEN }}
+          RELITH_REPO_TOKEN: ${{ secrets.RELITH_REPO_TOKEN }}
         run: |
           set -euo pipefail
           for g in $GAMES; do
-            case "$g" in openjkdf2|openmots|sam-fe|sam-se|half-life|doom3|darkforces|sote|postal|nolf2|raze) ;; *) echo "::error::Unknown game: $g"; exit 1;; esac
+            case "$g" in openjkdf2|openmots|sam-fe|sam-se|half-life|doom3|darkforces|sote|postal|nolf2|raze|nolf) ;; *) echo "::error::Unknown game: $g"; exit 1;; esac
           done
           mkdir -p "$WORK"
           # slug, repo, run, release asset, artifact name[, workflow: no release,
@@ -137,6 +141,23 @@ jobs:
               ;;
             *) echo "sote: not asked for" ;;
           esac
+          # No One Lives Forever (relith): a private repo's ios-latest release.
+          case " $GAMES " in
+            *" nolf "*)
+              RELITH_REPO_TOKEN=$(printf %s "$RELITH_REPO_TOKEN" | tr -d '[:space:]')
+              if [ -z "$RELITH_REPO_TOKEN" ]; then
+                echo "::warning::nolf skipped: add the RELITH_REPO_TOKEN secret (fine-grained token, Contents: Read on relith-dev/relith)"
+                echo "GAMES=$(printf ' %s ' $GAMES | sed 's/ nolf / /' | xargs)" >> "$GITHUB_ENV"
+              else
+                mkdir -p "$WORK/dl-nolf"
+                GH_TOKEN=$RELITH_REPO_TOKEN gh release download ios-latest --repo relith-dev/relith \
+                  --pattern relith-nolf-ios-unsigned.ipa --dir "$WORK/dl-nolf"
+                mv "$WORK/dl-nolf/relith-nolf-ios-unsigned.ipa" "$WORK/nolf.ipa"
+                echo "nolf: $(du -h "$WORK/nolf.ipa" | cut -f1) from ios-latest"
+              fi
+              ;;
+            *) echo "nolf: not asked for" ;;
+          esac
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -181,7 +202,7 @@ jobs:
           cd "$WORK"
           status=0
           fastlane sign > sign.log 2>&1 || status=$?
-          grep -E "Signed (openjkdf2|openmots|sam-|half-life|doom3|darkforces|sote|postal|nolf2|raze)" sign.log || true
+          grep -E "Signed (openjkdf2|openmots|sam-|half-life|doom3|darkforces|sote|postal|nolf2|raze|nolf)" sign.log || true
           if [ "$status" != 0 ]; then grep -E "\[!\]|rror" sign.log | tail -8; exit "$status"; fi
 
       - name: Replace the game links

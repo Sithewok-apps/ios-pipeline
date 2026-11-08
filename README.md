@@ -162,6 +162,10 @@ has a page of its own with just its **Install** button, to send to a friend:
   sithewok13-dev/sote-ios. Players still copy in their own ROM.
 - POSTAL: https://sithewok-apps.github.io/ios-pipeline/postal/ (`postal`)
 - No One Lives Forever 2: https://sithewok-apps.github.io/ios-pipeline/nolf2/ (`nolf2`)
+- No One Lives Forever: https://sithewok-apps.github.io/ios-pipeline/nolf/
+  (`nolf`, from relith). Its repo is private, so it needs the
+  `RELITH_REPO_TOKEN` secret here: a fine-grained token with **Contents: Read**
+  on relith-dev/relith (without it, nolf is skipped).
 - Raze (Duke Nukem 3D, Blood, Shadow Warrior, Redneck Rampage, PowerSlave):
   https://sithewok-apps.github.io/ios-pipeline/raze/ (`raze`)
 - DOOM 3: https://sithewok-apps.github.io/ios-pipeline/doom3/ (from the

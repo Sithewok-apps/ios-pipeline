@@ -195,7 +195,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh workflow run update-game-links.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" \
-            -f games="openjkdf2 openmots sam-fe sam-se half-life doom3 darkforces sote postal nolf2 raze"
+            -f games="openjkdf2 openmots sam-fe sam-se half-life doom3 darkforces sote postal nolf2 raze nolf"
           echo "Started Update game links for every game"
 
       - name: Tell the owner
