@@ -8,7 +8,8 @@
 # (install-game-*, from update-game-links.yml), which stay until replaced.
 # Each game also gets a page of its own with just its Install button, to send
 # to a friend: /jedi-knight/, /mots/, /serious-sam/, /serious-sam-se/,
-# /half-life/, /doom3/, /dark-forces/, /shadows-of-the-empire/, /otse/.
+# /half-life/, /doom3/, /dark-forces/, /shadows-of-the-empire/, /otse/, /raze/,
+# /doom/, /wolf3d/.
 name: Install links
 
 on:
@@ -79,7 +80,8 @@ jobs:
                    "sam-fe": ("serious-sam", "Serious Sam"), "sam-se": ("serious-sam-se", "Serious Sam: The Second Encounter"),
                    "half-life": ("half-life", "Half-Life"), "doom3": ("doom3", "DOOM 3"), "darkforces": ("dark-forces", "Dark Forces"),
                    "sote": ("shadows-of-the-empire", "Shadows of the Empire"),
-                   "otse": ("otse", "Oregon Trail Susy Edition")}
+                   "otse": ("otse", "Oregon Trail Susy Edition"),
+                   "raze": ("raze", "Raze"), "doom": ("doom", "DOOM"), "wolf3d": ("wolf3d", "Wolf3D")}
           apps, games = [], {}
           for tag in sorted(os.listdir(ipas)):
               d = os.path.join(ipas, tag)

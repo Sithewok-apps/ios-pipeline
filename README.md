@@ -169,6 +169,13 @@ has a page of its own with just its **Install** button, to send to a friend:
   build that cut the co-op mod's text down to its own lines, so the app
   carries none of the game's files).
 
+- Raze (Duke Nukem 3D, Redneck Rampage, Blood, Shadow Warrior, PowerSlave):
+  https://sithewok-apps.github.io/ios-pipeline/raze/ (`raze`)
+- DOOM: https://sithewok-apps.github.io/ios-pipeline/doom/ (`doom`)
+- Wolf3D: https://sithewok-apps.github.io/ios-pipeline/wolf3d/ (`wolf3d`)
+  (these three from the ios-latest releases of sithewok13-dev/raze-ios-,
+  uzdoom and ecwolf; players copy in their own game files)
+
 Run **Update game links** with `games` set to the ones to refresh, for example
 `half-life darkforces`. Half-Life comes from its `ios-latest` release; DOOM 3
 and Dark Forces from their newest successful build on the `ios` branch, and

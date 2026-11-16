@@ -9,7 +9,8 @@
 # which needs the SOTE_REPO_TOKEN secret (a fine-grained token with Actions:
 # Read on sithewok13-dev/sote-ios). Oregon Trail Susy Edition (otse) comes from
 # the oregon-latest release of sithewok13-dev/near-grog ("Auto: OTSE builds",
-# auto-otse.yml, starts it for each new build).
+# auto-otse.yml, starts it for each new build). Raze, DOOM and Wolf3D come
+# from the ios-latest releases of sithewok13-dev/raze-ios-, uzdoom and ecwolf.
 # "Auto: Jedi Knight builds" (auto-openjkdf2.yml) starts it for openjkdf2 and
 # openmots only, when the game repo has a new build.
 name: Update game links
@@ -27,11 +28,11 @@ on:
         required: false
         default: ""
       other_run:
-        description: Half-Life, DOOM 3, Dark Forces or SotE build run ID, when signing just that one (leave empty for the newest)
+        description: Half-Life, DOOM 3, Dark Forces, SotE, Raze, DOOM or Wolf3D build run ID, when signing just that one (leave empty for the newest)
         required: false
         default: ""
       games:
-        description: Which games to sign, separated by spaces (also half-life, doom3, darkforces, sote, otse)
+        description: Which games to sign, separated by spaces (also half-life, doom3, darkforces, sote, otse, raze, doom, wolf3d)
         required: false
         default: openjkdf2 openmots sam-fe sam-se
 
@@ -70,7 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           for g in $GAMES; do
-            case "$g" in openjkdf2|openmots|sam-fe|sam-se|half-life|doom3|darkforces|sote|otse) ;; *) echo "::error::Unknown game: $g"; exit 1;; esac
+            case "$g" in openjkdf2|openmots|sam-fe|sam-se|half-life|doom3|darkforces|sote|otse|raze|doom|wolf3d) ;; *) echo "::error::Unknown game: $g"; exit 1;; esac
           done
           mkdir -p "$WORK"
           # slug, repo, run, release asset, artifact name[, workflow: no release,
@@ -102,6 +103,9 @@ jobs:
           fetch half-life sithewok13-dev/xash3d-fwgs "$OTHER_RUN" Xash3D-iOS-unsigned.ipa Xash3D-iOS-unsigned-ipa
           fetch doom3 sithewok13-dev/doom3-ios "$OTHER_RUN" DOOM3-iOS-unsigned.ipa DOOM3-iOS-unsigned.ipa ios.yml
           fetch darkforces sithewok13-dev/TheForceEngine "$OTHER_RUN" DarkForces-iOS-unsigned.ipa DarkForces-iOS-unsigned.ipa ios.yml
+          fetch raze sithewok13-dev/raze-ios- "$OTHER_RUN" Raze.ipa Raze-ios
+          fetch doom sithewok13-dev/uzdoom "$OTHER_RUN" DOOM.ipa DOOM-ios
+          fetch wolf3d sithewok13-dev/ecwolf "$OTHER_RUN" Wolf3D-ios.ipa Wolf3D-ios
           # Shadows of the Empire: a private repo, and an artifact named after
           # the version (SotE-iOS-<version>.ipa) from the newest successful
           # build on main.
@@ -237,7 +241,7 @@ jobs:
           cd "$WORK"
           status=0
           fastlane sign > sign.log 2>&1 || status=$?
-          grep -E "Signed (openjkdf2|openmots|sam-|half-life|doom3|darkforces|sote|otse)" sign.log || true
+          grep -E "Signed (openjkdf2|openmots|sam-|half-life|doom3|darkforces|sote|otse|raze|doom|wolf3d)" sign.log || true
           if [ "$status" != 0 ]; then grep -E "\[!\]|rror" sign.log | tail -8; exit "$status"; fi
 
       - name: Replace the game links
